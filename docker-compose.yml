@@ -4,18 +4,33 @@
 # injected via Coolify's Environment Variables/Secrets UI (backed by the
 # repo's .env.example as the reference), not committed here.
 #
-# The service is intentionally NOT bound to a host port. Coolify's proxy
-# (Traefik) reaches containers over the internal Docker network, so
-# publishing 9119:9119 would only add an unnecessary public exposure path.
-# In Coolify, set the service's "Ports Exposes" value to 9119 and attach
-# your domain — HTTPS/Let's Encrypt is then handled by Coolify
-# automatically.
+# Two containers: hermes-agent (gateway + built-in dashboard) and
+# hermes-webui (browser chat UI, third-party project by nesquena). The
+# public domain routes to hermes-webui on port 8787 — see
+# docs/superpowers/specs/2026-08-26-hermes-agent-infra-design.md and the
+# 2026-08-26 addendum in the README for why this repo initially shipped
+# single-container-only, and why hermes-webui was reintroduced deliberately
+# afterward with a version pin verified to include the upstream
+# compatibility fix (nesquena/hermes-webui#6458).
 #
-# Single container: Hermes Agent's built-in web dashboard
-# (HERMES_DASHBOARD=1) replaces the separate hermes-webui container used
-# previously — see
-# docs/superpowers/specs/2026-08-26-hermes-agent-infra-design.md for why
-# that combination broke and why this is the current recommended setup.
+# Neither service is bound to a host port. Coolify's proxy (Traefik) reaches
+# containers over the internal Docker network, so publishing ports would
+# only add unnecessary public exposure paths. In Coolify, set the
+# hermes-webui service's "Ports Exposes" to 8787 and attach your domain —
+# HTTPS/Let's Encrypt is then handled by Coolify automatically. The
+# hermes-agent service's dashboard (port 9119) and gateway API (port 8642)
+# stay internal-only, reachable via `docker exec` or an SSH tunnel if
+# needed — see README "Acceso al dashboard integrado".
+#
+# IMPORTANT — upgrading the hermes-agent image later: the hermes-agent-src
+# volume is populated from the image's /opt/hermes ONLY on first `up`, and
+# Docker reuses it verbatim on every later run — even after pulling a newer
+# hermes-agent image. This is confirmed by hermes-webui's own reference
+# compose (upstream docs/docker.md). Forgetting this after an upgrade is
+# exactly the entrypoint-dispatch.sh / editable-install failure this repo
+# hit historically. After bumping the hermes-agent image tag: stop the
+# stack, remove the hermes-agent-src volume, then start again — see README
+# "Actualización de Hermes Agent".
 
 services:
   hermes:
@@ -31,8 +46,14 @@ services:
     # confirmed to work with cap_drop: ALL. Revisit if/when that's tested.
     expose:
       - "9119"
+      - "8642"
     volumes:
       - hermes-data:/opt/data
+      # Exposes the agent's own source tree so hermes-webui can install its
+      # Python dependencies from it at startup. Read-write here (the agent
+      # writes into its own source dir at boot); mounted read-only on the
+      # webui side below.
+      - hermes-agent-src:/opt/hermes
     environment:
       HERMES_DASHBOARD: "1"
       HERMES_UID: "1000"
@@ -40,7 +61,10 @@ services:
 
       # Public HTTPS URL of this deployment (e.g. https://hermes.example.com).
       # Required so the dashboard's auth gate builds correct
-      # session/OAuth-callback URLs behind Coolify's reverse proxy.
+      # session/OAuth-callback URLs behind Coolify's reverse proxy. Kept
+      # even though the public domain now routes to hermes-webui instead —
+      # the dashboard itself still needs a valid value for its internal
+      # auth-gate URL construction whenever it's reached directly.
       HERMES_DASHBOARD_PUBLIC_URL: ${HERMES_DASHBOARD_PUBLIC_URL:?HERMES_DASHBOARD_PUBLIC_URL must be set to your public HTTPS domain}
 
       # Dashboard auth (basic auth) — see .env.example for how to generate
@@ -49,6 +73,15 @@ services:
       HERMES_DASHBOARD_BASIC_AUTH_USERNAME: ${HERMES_DASHBOARD_BASIC_AUTH_USERNAME:?HERMES_DASHBOARD_BASIC_AUTH_USERNAME must be set}
       HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH: ${HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH:?HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH must be set}
       HERMES_DASHBOARD_BASIC_AUTH_SECRET: ${HERMES_DASHBOARD_BASIC_AUTH_SECRET:?HERMES_DASHBOARD_BASIC_AUTH_SECRET must be set}
+
+      # Gateway API server (port 8642). hermes-webui's Tasks/cron health
+      # probe and its "gateway reachable" status pill need this reachable —
+      # without a key of at least 16 chars, the agent still runs messaging
+      # + cron fine, but port 8642 stays unbound and webui reports "Gateway
+      # endpoint not reachable" (harmless, but loses those two features).
+      API_SERVER_ENABLED: "true"
+      API_SERVER_HOST: "0.0.0.0"
+      API_SERVER_KEY: ${API_SERVER_KEY:?API_SERVER_KEY must be set (>=16 chars) so hermes-webui can reach the gateway API}
     healthcheck:
       # Mirrors the healthcheck the original Coolify template used for
       # this same image family (`test -d /home/hermes/.hermes || exit 1`):
@@ -66,6 +99,65 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  hermes-webui:
+    # Pinned to a docker tag verified to include the fix for
+    # nesquena/hermes-webui#6458 (the "Building wheels or sdists for
+    # hermes-agent is not supported" crash-loop this repo hit historically
+    # with the stable v0.51.92/v0.52.113 tags, which sit 263+ commits
+    # behind the fix). The "stable" v-track has NOT absorbed the fix as of
+    # 2026-08-26 — 0.52.264 is on the experimental track but is the tag
+    # actually confirmed (via `git compare` against the fix commit) to
+    # include it, and its multi-arch (amd64+arm64) image is published on
+    # ghcr.io. Being on the experimental track, expect more churn than a
+    # stable tag — see README "Actualización" for the review cadence.
+    image: ghcr.io/nesquena/hermes-webui:0.52.264
+    container_name: hermes-webui
+    depends_on:
+      - hermes
+    restart: unless-stopped
+    expose:
+      - "8787"
+    volumes:
+      # Same underlying volume as hermes-agent's /opt/data — Docker
+      # volumes don't care that the two containers mount it at different
+      # paths, only that it's the same volume object. Shares config,
+      # sessions, and state between the gateway and the web UI.
+      - hermes-data:/home/hermeswebui/.hermes
+      # Read-only: webui only reads this to install the agent's Python
+      # dependencies at startup (`uv pip install`) — never needs to write.
+      - hermes-agent-src:/home/hermeswebui/.hermes/hermes-agent:ro
+      - hermes-workspace:/workspace
+    environment:
+      HERMES_WEBUI_HOST: "0.0.0.0"
+      HERMES_WEBUI_PORT: "8787"
+      HERMES_WEBUI_STATE_DIR: /home/hermeswebui/.hermes/webui
+      WANTED_UID: "1000"
+      WANTED_GID: "1000"
+
+      # Lets webui reach the agent's gateway API over the compose network
+      # for its Tasks/cron and "gateway reachable" status features.
+      HERMES_API_URL: http://hermes:8642
+      HERMES_WEBUI_GATEWAY_API_KEY: ${API_SERVER_KEY:?API_SERVER_KEY must be set (>=16 chars) so hermes-webui can reach the gateway API}
+
+      # webui's own login — separate from the built-in dashboard's basic
+      # auth above. Required since the public domain is routed here.
+      HERMES_WEBUI_PASSWORD: ${HERMES_WEBUI_PASSWORD:?HERMES_WEBUI_PASSWORD must be set}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8787/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 volumes:
   hermes-data:
     name: hermes-data
+  hermes-agent-src:
+    name: hermes-agent-src
+  hermes-workspace:
+    name: hermes-workspace
