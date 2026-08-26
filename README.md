@@ -88,10 +88,17 @@ Variables fijas en `docker-compose.yml` (no hace falta tocarlas):
 `HERMES_DASHBOARD=1`, `HERMES_UID=1000`, `HERMES_GID=1000`.
 
 Se eligió basic auth por ser suficiente para un uso personal detrás del
-HTTPS que ya provee Coolify/Traefik. El dashboard también soporta OAuth
-de Nous Research y OIDC self-hosted (Keycloak, Authelia, etc.) si más
-adelante se necesita algo más robusto — no están configurados en este
-repo, ver la [documentación oficial del dashboard](https://hermes-agent.nousresearch.com/docs/user-guide/features/web-dashboard)
+HTTPS que ya provee Coolify/Traefik. **No es HTTP Basic Auth clásico**
+(el de `curl -u`): sin sesión, cualquier request se redirige a una
+página de login (`/login`) con un formulario real; al enviar
+usuario/password correctos, el backend responde con cookies de sesión
+`HttpOnly` (`hermes_session_at`/`hermes_session_rt`) — confirmado
+probando el contenedor real en local, incluyendo que un password
+incorrecto devuelve `401 Unauthorized` con `{"detail":"Invalid
+credentials"}`. El dashboard también soporta OAuth de Nous Research y
+OIDC self-hosted (Keycloak, Authelia, etc.) si más adelante se necesita
+algo más robusto — no están configurados en este repo, ver la
+[documentación oficial del dashboard](https://hermes-agent.nousresearch.com/docs/user-guide/features/web-dashboard)
 para esas alternativas.
 
 Este repo **no** carga API keys de proveedores de LLM (`ANTHROPIC_API_KEY`,
