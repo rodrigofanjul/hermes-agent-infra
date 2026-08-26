@@ -331,6 +331,25 @@ actual.
   actualizá `HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH` en Coolify, y
   redeploy.
 
+**"Contraseña incorrecta" con el password correcto**
+- Confirmado empíricamente: Coolify aplica interpolación estilo Compose
+  (`$VAR`) al valor de `HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH` antes
+  de inyectarlo al contenedor. El hash (`scrypt$N$r$p$salt$digest`) tiene
+  varios segmentos separados por `$` — cualquier segmento que empiece con
+  una **letra** justo después del `$` (típicamente el salt, en base64) se
+  interpreta como una variable inexistente y se borra silenciosamente; los
+  segmentos que empiezan con **dígito** (los parámetros de costo N/r/p)
+  sobreviven porque ninguna variable puede empezar con un número — por
+  eso solo desaparece una parte del hash, no todo, y es fácil no notarlo.
+  **Fix:** al pegar el hash en Coolify, duplicá cada `$` como `$$` (escape
+  estándar de Compose para un `$` literal). Verificá en la pestaña
+  **Terminal** del recurso:
+  ```bash
+  echo "$HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH"
+  ```
+  Tiene que imprimir el hash completo con `$` simples, idéntico al que
+  generaste — si falta algún segmento, todavía te falta escapar algún `$`.
+
 **`exec format error` en los logs del contenedor**
 - Problema de arquitectura de CPU: la imagen no es compatible con el
   procesador del servidor (típicamente amd64 vs arm64 en un VPS Ampere).
