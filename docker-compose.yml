@@ -23,6 +23,12 @@ services:
     container_name: hermes
     command: gateway run
     restart: unless-stopped
+    # No cap_drop/security_opt/mem_limit hardening here, unlike
+    # ai-gateway-infra's OmniRoute service: the container's own entrypoint
+    # does a UID/GID chown at startup ("[stage2] Changing hermes UID to
+    # 1000" in the logs), which needs privileges not yet validated under
+    # reduced capabilities — unlike OmniRoute, this was not empirically
+    # confirmed to work with cap_drop: ALL. Revisit if/when that's tested.
     expose:
       - "9119"
     volumes:
