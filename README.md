@@ -204,8 +204,7 @@ distingue snapshots por `--host` y `--tag` (acá: `hermes-agent-backup` /
 `ai-gateway-infra`), así que no hace falta un bucket B2 separado — solo
 la misma `RESTIC_PASSWORD` que ya generaste para ese repositorio.
 
-#### Setup inicial (si todavía no corriste el backup de OmniRoute en este
-servidor)
+#### Setup inicial (si todavía no corriste el backup de OmniRoute en este servidor)
 
 Seguí el mismo setup inicial documentado en
 [ai-gateway-infra README, sección "Backups"](https://github.com/rodrigofanjul/ai-gateway-infra#13-backups)
