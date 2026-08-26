@@ -87,6 +87,13 @@ cargan en Coolify (sección 4).
 Variables fijas en `docker-compose.yml` (no hace falta tocarlas):
 `HERMES_DASHBOARD=1`, `HERMES_UID=1000`, `HERMES_GID=1000`.
 
+Se eligió basic auth por ser suficiente para un uso personal detrás del
+HTTPS que ya provee Coolify/Traefik. El dashboard también soporta OAuth
+de Nous Research y OIDC self-hosted (Keycloak, Authelia, etc.) si más
+adelante se necesita algo más robusto — no están configurados en este
+repo, ver la [documentación oficial del dashboard](https://hermes-agent.nousresearch.com/docs/user-guide/features/web-dashboard)
+para esas alternativas.
+
 Este repo **no** carga API keys de proveedores de LLM (`ANTHROPIC_API_KEY`,
 `OPENAI_API_KEY`, etc.) — el modelo se configura post-deploy apuntando a
 OmniRoute (sección 9), no por variable de entorno.
