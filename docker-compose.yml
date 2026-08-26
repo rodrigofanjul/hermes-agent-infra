@@ -1,0 +1,65 @@
+# hermes-agent-infra — production deployment for Coolify
+#
+# Coolify treats this file as the source of truth: environment values are
+# injected via Coolify's Environment Variables/Secrets UI (backed by the
+# repo's .env.example as the reference), not committed here.
+#
+# The service is intentionally NOT bound to a host port. Coolify's proxy
+# (Traefik) reaches containers over the internal Docker network, so
+# publishing 9119:9119 would only add an unnecessary public exposure path.
+# In Coolify, set the service's "Ports Exposes" value to 9119 and attach
+# your domain — HTTPS/Let's Encrypt is then handled by Coolify
+# automatically.
+#
+# Single container: Hermes Agent's built-in web dashboard
+# (HERMES_DASHBOARD=1) replaces the separate hermes-webui container used
+# previously — see
+# docs/superpowers/specs/2026-08-26-hermes-agent-infra-design.md for why
+# that combination broke and why this is the current recommended setup.
+
+services:
+  hermes:
+    image: nousresearch/hermes-agent:v2026.8.19
+    container_name: hermes
+    command: gateway run
+    restart: unless-stopped
+    expose:
+      - "9119"
+    volumes:
+      - hermes-data:/opt/data
+    environment:
+      HERMES_DASHBOARD: "1"
+      HERMES_UID: "1000"
+      HERMES_GID: "1000"
+
+      # Public HTTPS URL of this deployment (e.g. https://hermes.example.com).
+      # Required so the dashboard's auth gate builds correct
+      # session/OAuth-callback URLs behind Coolify's reverse proxy.
+      HERMES_DASHBOARD_PUBLIC_URL: ${HERMES_DASHBOARD_PUBLIC_URL:?HERMES_DASHBOARD_PUBLIC_URL must be set to your public HTTPS domain}
+
+      # Dashboard auth (basic auth) — see .env.example for how to generate
+      # the password hash. The dashboard refuses to bind to a non-loopback
+      # address without an auth provider configured, so these are required.
+      HERMES_DASHBOARD_BASIC_AUTH_USERNAME: ${HERMES_DASHBOARD_BASIC_AUTH_USERNAME:?HERMES_DASHBOARD_BASIC_AUTH_USERNAME must be set}
+      HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH: ${HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH:?HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH must be set}
+      HERMES_DASHBOARD_BASIC_AUTH_SECRET: ${HERMES_DASHBOARD_BASIC_AUTH_SECRET:?HERMES_DASHBOARD_BASIC_AUTH_SECRET must be set}
+    healthcheck:
+      # Mirrors the healthcheck the original Coolify template used for
+      # this same image family (`test -d /home/hermes/.hermes || exit 1`):
+      # confirms the persistent data directory exists and is mounted,
+      # without depending on curl/wget being present in the image or
+      # guessing at an unconfirmed HTTP health path.
+      test: ["CMD-SHELL", "test -d /opt/data || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  hermes-data:
+    name: hermes-data
