@@ -44,7 +44,7 @@ ya está corriendo y lo usa como único proveedor de modelo (ver sección 9).
                         ┌──────────┴───────────────┐
                         │   contenedor hermes        │
                         │ nousresearch/               │
-                        │ hermes-agent:v2026.8.19      │
+                        │ hermes-agent:v2026.8.27      │
                         │  dashboard :9119 (sin dominio)│
                         │  gateway   :8642 (interno)    │
                         └──────────┬───────────────────┘
@@ -62,7 +62,8 @@ ya está corriendo y lo usa como único proveedor de modelo (ver sección 9).
   (`8642`) quedan internos, sin dominio asignado — ver sección "Acceso al
   dashboard integrado" más abajo si necesitás entrar directo.
 - Imagen del agente fijada a un tag concreto
-  (`nousresearch/hermes-agent:v2026.8.19`, `arm64`+`amd64`). Imagen de
+  (`nousresearch/hermes-agent:v2026.8.27`, versión de paquete `0.20.6`,
+  `arm64`+`amd64`). Imagen de
   `hermes-webui` fijada a `0.52.264` — es un tag del track
   **experimental** del proyecto, no del track "estable" (`vX.Y.Z`), porque
   el track estable todavía no absorbió el fix de compatibilidad que este
@@ -143,7 +144,7 @@ es esperable, no es que se colgó. En Windows usá Git Bash para el `\` de
 continuación de línea (PowerShell necesita `` ` `` en su lugar):
 
 ```bash
-docker run --rm nousresearch/hermes-agent:v2026.8.19 \
+docker run --rm nousresearch/hermes-agent:v2026.8.27 \
   python -c "from plugins.dashboard_auth.basic import hash_password; print(hash_password('TU_PASSWORD'))"
 ```
 
@@ -418,10 +419,55 @@ cualquier fix relevante comparándolo contra el commit del fix en GitHub
 actualizar solo `hermes-webui` (ese volumen depende de la versión del
 agente, no de la webui).
 
+### Configurar compresión de contexto (`tail_mode: lean`)
+
+Desde `v2026.8.27`/`0.20.6`, `lean` es el `tail_mode` por defecto en
+`hermes-agent` (antes era `legacy`) — igual, este repo fija los valores
+explícitamente en vez de depender del default, para que una futura
+versión que cambie el default no cambie silenciosamente este deployment.
+Se aplica con `hermes config set` (edita `/opt/data/config.yaml` sin
+tocar el resto del archivo) — no reescribas `config.yaml` a mano para
+esto. El comando es idempotente: correrlo varias veces con el mismo valor
+no duplica ni corrompe nada, solo reescribe la misma clave.
+
+Desde la Terminal del servidor (o la pestaña **Terminal** del recurso
+`hermes` en Coolify):
+
+```bash
+docker exec hermes hermes config set compression.enabled true
+docker exec hermes hermes config set compression.tail_mode lean
+docker exec hermes hermes config set compression.threshold 0.50
+docker exec hermes hermes config set compression.in_place true
+docker exec hermes hermes config set compression.progress_notices false
+docker exec hermes hermes config set compression.idle_compact_after_seconds 0
+```
+
+Reiniciá el gateway para que tome el cambio (botón **Restart Gateway** en
+cualquiera de las dos UIs, o `docker restart hermes hermes-webui`), y
+confirmá con:
+
+```bash
+docker exec hermes hermes config get compression
+```
+
+**No se tocan** `compression.micro_compact`,
+`compression.proactive_prune_tokens` ni
+`compression.codex_responses_native` — quedan en su default (`False`/`0`)
+salvo que haya evidencia concreta de que hace falta activarlos.
+Tampoco se toca `model.default`, `model.provider`, la longitud de
+contexto, el modelo auxiliar de compresión, ni
+`whatsapp.reply_prefix` (debe seguir vacío).
+
 ## 12. Rollback
 
 1. Editá `docker-compose.yml` y volvé al tag de imagen anterior conocido
-   como estable.
+   como estable. Rollback exacto para el upgrade a `v2026.8.27`:
+   ```bash
+   git revert <commit-del-upgrade>   # o edición manual del tag a v2026.8.19
+   ```
+   equivalente manual: cambiar `image: nousresearch/hermes-agent:v2026.8.27`
+   de vuelta a `image: nousresearch/hermes-agent:v2026.8.19` en
+   [docker-compose.yml](docker-compose.yml).
 2. Si el rollback es de `hermes-agent`, aplicá también el paso 4 de la
    sección 11 (recrear `hermes-agent-src`) — el mismo problema de volumen
    stale aplica en cualquier dirección.
@@ -431,7 +477,11 @@ agente, no de la webui).
 
 `hermes-data` no se recrea entre deploys, así que un rollback no pierde
 configuración ni memoria — solo revertí la imagen si sabés que la versión
-anterior es compatible con el esquema de datos actual.
+anterior es compatible con el esquema de datos actual. La configuración
+de compresión de la sección anterior vive en `config.yaml` dentro de
+`hermes-data`, así que sobrevive a un rollback de imagen sin acción
+adicional (`v0.20.5` ya soporta `tail_mode: lean` como opción, solo no
+lo trae como default).
 
 ## 13. Troubleshooting básico
 
