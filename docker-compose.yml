@@ -13,14 +13,18 @@
 # afterward with a version pin verified to include the upstream
 # compatibility fix (nesquena/hermes-webui#6458).
 #
-# Neither service is bound to a host port. Coolify's proxy (Traefik) reaches
-# containers over the internal Docker network, so publishing ports would
-# only add unnecessary public exposure paths. In Coolify, set the
-# hermes-webui service's "Ports Exposes" to 8787 and attach your domain —
-# HTTPS/Let's Encrypt is then handled by Coolify automatically. The
-# hermes-agent service's dashboard (port 9119) and gateway API (port 8642)
-# stay internal-only, reachable via `docker exec` or an SSH tunnel if
-# needed — see README "Acceso al dashboard integrado".
+# hermes-agent's service (dashboard on 9119, gateway API on 8642) stays
+# internal-only, reachable via `docker exec` or an SSH tunnel if needed —
+# see README "Acceso al dashboard integrado".
+#
+# hermes-webui publishes 8787 to the host on 0.0.0.0, so other tailnet
+# members (your own machine, other servers) can reach it directly via this
+# server's Tailscale IP without the public domain — relies on the OCI
+# Security List having no rule for 8787 to stay unreachable from the public
+# internet (same pattern used for OmniRoute and this server's Postgres/
+# Redis). Coolify's proxy (Traefik) still reaches it over the internal
+# Docker network for the public domain/HTTPS routing (see "Ports Exposes"
+# = 8787 in Coolify).
 #
 # IMPORTANT — upgrading the hermes-agent image later: the hermes-agent-src
 # volume is populated from the image's /opt/hermes ONLY on first `up`, and
@@ -117,6 +121,8 @@ services:
     restart: unless-stopped
     expose:
       - "8787"
+    ports:
+      - "8787:8787"
     volumes:
       # Same underlying volume as hermes-agent's /opt/data — Docker
       # volumes don't care that the two containers mount it at different
