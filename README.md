@@ -61,9 +61,13 @@ ya está corriendo y lo usa como único proveedor de modelo (ver sección 9).
 - El dashboard integrado de `hermes-agent` (`9119`) y el gateway API
   (`8642`) quedan internos, sin dominio asignado — ver sección "Acceso al
   dashboard integrado" más abajo si necesitás entrar directo.
-- Imagen del agente fijada a un tag concreto
-  (`nousresearch/hermes-agent:v2026.8.27`, versión de paquete `0.20.6`,
-  `arm64`+`amd64`). Imagen de
+- Imagen del agente fijada a un tag concreto (versión de paquete
+  `0.21.0`, `arm64`+`amd64`) — pero desde que se agregó el proveedor
+  de memoria Mnemosyne, `hermes` ya no tiene una línea `image:` propia:
+  se construye con `build: .` a partir del `Dockerfile` de este repo,
+  que a su vez fija el tag base en su línea `FROM`. Ver
+  `docs/superpowers/specs/2026-08-31-mnemosyne-memory-provider-design.md`
+  para el porqué. Imagen de
   `hermes-webui` fijada a `0.52.264` — es un tag del track
   **experimental** del proyecto, no del track "estable" (`vX.Y.Z`), porque
   el track estable todavía no absorbió el fix de compatibilidad que este
@@ -388,18 +392,41 @@ Procedimiento completo para actualizar `hermes-agent`:
 1. Elegí la versión destino en el changelog. Preferí siempre un tag
    `vYYYY.M.D` (versión inmutable) — `:latest` puede cambiar sin que vos
    lo controles.
-2. Editá `docker-compose.yml`, cambiando el tag de imagen de `hermes`.
+2. **Desde que este repo agregó el proveedor de memoria Mnemosyne** (ver
+   `docs/superpowers/specs/2026-08-31-mnemosyne-memory-provider-design.md`),
+   el servicio `hermes` ya no tiene una línea `image:` — usa
+   `build: .`, y la imagen se construye a partir del `Dockerfile` de
+   este repo. Editá el tag en la línea `FROM` de ese `Dockerfile`
+   (**no** busques `image:` en `docker-compose.yml`, ya no existe ahí).
 3. Commiteá y pusheá el cambio a este repositorio.
 4. **Antes o inmediatamente después del redeploy**, borrá el volumen
-   `hermes-agent-src` para forzar su repoblado desde la imagen nueva. En
-   la Terminal del servidor (no la del contenedor):
+   `hermes-agent-src` para forzar su repoblado desde la imagen nueva —
+   este paso aplica igual de obligatorio con `build: .` que con el
+   `image:` de antes (el volumen no distingue de dónde salió la
+   imagen). En la Terminal del servidor (no la del contenedor):
    ```bash
    docker compose -f /ruta/al/proyecto/docker-compose.yml stop
-   docker volume rm hermes-agent-src
+   docker compose -f /ruta/al/proyecto/docker-compose.yml build --no-cache
+   docker volume rm <uuid-del-recurso>_hermes-agent-src
    docker compose -f /ruta/al/proyecto/docker-compose.yml up -d
    ```
+   (El nombre del volumen tiene un prefijo con el UUID del recurso en
+   Coolify — confirmalo con `docker volume ls | grep hermes-agent-src`
+   antes de borrar. `build --no-cache` evita servir una capa vieja
+   cacheada del `RUN uv pip install...` si solo cambiaste el `FROM`.)
    O, si preferís hacerlo desde Coolify: parar el recurso, borrar el
-   volumen desde la pestaña **Persistent Storage**, y volver a arrancar.
+   volumen desde la pestaña **Persistent Storage**, y volver a arrancar
+   (Coolify hace el `build` solo al redeployar un recurso con
+   `build: .`).
+
+   **Este mismo paso 4 aplica también si el cambio es solo al tag de
+   `mnemosyne-hermes` en el `Dockerfile`, sin tocar la versión base de
+   `hermes-agent`** — el paquete vive dentro del volumen igual, así que
+   un `image:` de la app sin cambios pero un `Dockerfile` modificado
+   todavía requiere recrear `hermes-agent-src` o el build nuevo queda
+   invisible detrás del volumen viejo. Confirmado empíricamente: el
+   primer deploy de Mnemosyne en este repo crasheó exactamente por
+   saltarse este paso.
 5. Confirmá en **Runtime Logs** de `hermes-webui` que el arranque
    instala las dependencias sin el error de "Building wheels or sdists...
    is not supported" (si aparece, `hermes-webui` quedó desalineado con

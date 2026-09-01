@@ -40,10 +40,15 @@ Nuevo `Dockerfile` en este repo, construido sobre la imagen pineada de
 
 ```dockerfile
 FROM nousresearch/hermes-agent:v2026.8.31
-RUN /opt/hermes/.venv/bin/python -m pip install mnemosyne-hermes==0.5.0
+RUN uv pip install --python /opt/hermes/.venv/bin/python mnemosyne-hermes==0.5.0
 COPY mnemosyne-bootstrap.sh /usr/local/bin/mnemosyne-bootstrap.sh
 RUN chmod +x /usr/local/bin/mnemosyne-bootstrap.sh
 ```
+
+(Originally written as `python -m pip install`. Production build failed
+with "No module named pip" — the base image's venv was built with `uv`
+and has no `pip` at all. Fixed to `uv pip install --python ...`; see the
+plan doc for the full incident trail.)
 
 - `mnemosyne-hermes==0.5.0` arrastra `mnemosyne-memory[embeddings]` como
   dependencia dura (confirmado vía `requires_dist` en PyPI) — perfil
@@ -71,11 +76,17 @@ VENV=/opt/hermes/.venv
 mkdir -p "$HERMES_HOME/plugins/mnemosyne"
 PKG_DIR="$("$VENV/bin/python" -c \
   'import pathlib, mnemosyne_hermes; print(pathlib.Path(mnemosyne_hermes.__file__).resolve().parent)')"
+
+if [ -z "$PKG_DIR" ] || [ ! -d "$PKG_DIR" ]; then
+  echo "mnemosyne-bootstrap: PKG_DIR is empty or not a directory ('$PKG_DIR') — refusing to symlink, aborting" >&2
+  exit 1
+fi
+
 ln -sfn "$PKG_DIR"/* "$HERMES_HOME/plugins/mnemosyne/"
 
 "$VENV/bin/hermes" config set memory.provider mnemosyne
 
-exec gateway run
+exec "$VENV/bin/hermes" gateway run
 ```
 
 Corre en cada boot del contenedor. No ejecuta código de terceros nuevo
@@ -84,6 +95,15 @@ imagen (paso 1) y setea una config. Es seguro que corra
 automáticamente sin supervisión, a diferencia de un `pip install` en
 cada arranque (alternativa descartada explícitamente por el riesgo de
 reinstalar código no auditado en cada boot sin control de versión).
+
+(Dos correcciones sobre la primera versión de este script, ambas
+encontradas durante la implementación — ver el plan doc para el
+detalle completo: el guard de `PKG_DIR` vacío, que evita un
+`ln -sfn /*` catastrófico; y el `exec` final, que originalmente decía
+`exec gateway run` y crasheaba en producción con `exec: gateway: not
+found` — `gateway` solo se resuelve como subcomando de `hermes` a
+través del routing de `main-wrapper.sh` de la imagen base, que este
+script no atraviesa una segunda vez.)
 
 ## Cambios en `docker-compose.yml`
 
@@ -96,16 +116,34 @@ reinstalar código no auditado en cada boot sin control de versión).
 +    command: ["/usr/local/bin/mnemosyne-bootstrap.sh"]
 ```
 
-## Riesgo abierto — requiere validación empírica
+## Riesgo abierto — resuelto durante la implementación
 
-No hay visibilidad del `entrypoint-dispatch.sh` interno de la imagen
-base (mismo mecanismo que causó el bug histórico de
-`hermes-agent-src` documentado en README sección 11/13). El wrapper
-asume que puede terminar con `exec gateway run` reproduciendo el
-comportamiento del `command:` original, pero **esto no está
-confirmado** — hay que validarlo contra el arranque real antes de
-confiar en que no rompe nada. Es el paso de mayor riesgo de todo el
-plan.
+Este riesgo (no había visibilidad del `entrypoint-dispatch.sh` interno
+de la imagen base) se validó empíricamente antes de deployar, y **el
+deploy real igual encontró dos problemas que la validación aislada no
+detectó** — ambos con causa raíz confirmada leyendo el código real de
+la imagen base (`main-wrapper.sh`), no por prueba y error:
+
+1. **`pip` no existe en el venv de la imagen base** (usa `uv`) — la
+   validación standalone también lo hubiera encontrado si se hubiera
+   corrido antes del primer intento real; se corrigió antes de llegar
+   a producción.
+2. **`exec gateway run` no es una invocación válida por sí sola** —
+   solo funciona como argumento que `main-wrapper.sh` interpreta y
+   traduce a `hermes gateway run` (routing de subcomando). Nuestro
+   script, al ser él mismo el `command:` del contenedor, no pasa por
+   ese routing una segunda vez para su propio `exec` final. **Esto sí
+   escapó a la validación aislada** (Task 3 del plan) porque esa
+   prueba corrió la imagen con su comportamiento de entrypoint por
+   defecto, sin pasar realmente por nuestro script como `command:` —
+   un gap real en el diseño de esa validación, documentado en el plan
+   para futura referencia.
+
+Ambos se encontraron y corrigieron en el primer despliegue real (ver
+plan para el detalle completo, incluyendo el incidente de producción
+—el contenedor entró en crash-loop y Coolify lo derribó— y su
+resolución). El mecanismo de arranque quedó confirmado funcionando en
+producción.
 
 ## Procedimiento de upgrade futuro de `hermes-agent`
 
@@ -116,6 +154,20 @@ imagen nueva pasa de `docker compose pull` a `docker compose build`
 Dockerfile de este repo, no Docker Hub directo, es la fuente de la
 imagen final. Bump del tag base en el `FROM` del Dockerfile en el
 mismo commit que el bump de versión.
+
+**Esto también aplica a un bump de solo `mnemosyne-hermes` sin tocar
+la imagen base** — el volumen `hermes-agent-src` igual necesita
+recrearse, porque el paquete vive dentro de él y Docker no lo
+repuebla si el volumen ya existe. Confirmado empíricamente: el primer
+deploy de esta feature crasheó exactamente por esto (el volumen ya
+existía de antes, shadowing el venv nuevo del build).
+
+**Nota operativa pendiente:** README sección 11 ("Actualización de
+Hermes Agent") todavía describe el procedimiento viejo (editar
+`image:` directo) — no refleja que `hermes` ahora usa `build: .` con
+el tag en el `Dockerfile`. Actualizar esa sección antes del próximo
+upgrade de `hermes-agent` para evitar que alguien edite el lugar
+equivocado.
 
 ## Testing / validación
 
