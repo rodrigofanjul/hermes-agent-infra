@@ -78,10 +78,12 @@ ln -sfn "$PKG_DIR"/* "$HERMES_HOME/plugins/mnemosyne/"
 
 "$VENV/bin/hermes" config set memory.provider mnemosyne
 
-exec gateway run
+exec "$VENV/bin/hermes" gateway run
 ```
 
 (This guard was added after a code-quality review caught a real risk: without it, an empty `$PKG_DIR` — which `set -e` does not catch, since a command substitution can succeed with empty output — turns the `ln -sfn "$PKG_DIR"/*` glob into `ln -sfn /*`, symlinking the entire root filesystem into the plugin directory.)
+
+(The final `exec` line was changed from `exec gateway run` to `exec "$VENV/bin/hermes" gateway run` after a production deploy crash-looped with `exec: gateway: not found`. Root cause, found by reading the base image's `/opt/hermes/docker/main-wrapper.sh`: the original `command: gateway run` was never a literal binary invocation — `main-wrapper.sh` inspects its first argument, and since `gateway` isn't itself an executable on PATH, routes it as `exec hermes gateway run` (subcommand pass-through). Our bootstrap script, once invoked as the container's `command:`, doesn't go through that routing logic a second time for its own final line — so it must spell out the real invocation itself.)
 
 - [ ] **Step 2: Make it executable locally (git preserves the mode bit on push)**
 

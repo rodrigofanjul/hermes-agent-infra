@@ -21,4 +21,4 @@ ln -sfn "$PKG_DIR"/* "$HERMES_HOME/plugins/mnemosyne/"
 
 "$VENV/bin/hermes" config set memory.provider mnemosyne
 
-exec gateway run
+exec "$VENV/bin/hermes" gateway run
