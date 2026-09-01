@@ -26,6 +26,10 @@
 # Docker network for the public domain/HTTPS routing (see "Ports Exposes"
 # = 8787 in Coolify).
 #
+# The `hermes` service builds from this repo's Dockerfile (see Dockerfile)
+# instead of pulling the image directly, to bundle the Mnemosyne memory
+# provider — see docs/superpowers/specs/2026-08-31-mnemosyne-memory-provider-design.md.
+#
 # IMPORTANT — upgrading the hermes-agent image later: the hermes-agent-src
 # volume is populated from the image's /opt/hermes ONLY on first `up`, and
 # Docker reuses it verbatim on every later run — even after pulling a newer
@@ -38,9 +42,9 @@
 
 services:
   hermes:
-    image: nousresearch/hermes-agent:v2026.8.31
+    build: .
     container_name: hermes
-    command: gateway run
+    command: ["/usr/local/bin/mnemosyne-bootstrap.sh"]
     restart: unless-stopped
     # No cap_drop/security_opt/mem_limit hardening here, unlike
     # ai-gateway-infra's OmniRoute service: the container's own entrypoint
