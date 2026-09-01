@@ -9,7 +9,7 @@
 # build), not pulled, after any change to this file or to the FROM tag.
 FROM nousresearch/hermes-agent:v2026.8.31
 
-RUN /opt/hermes/.venv/bin/python -m pip install mnemosyne-hermes==0.5.0
+RUN uv pip install --python /opt/hermes/.venv/bin/python mnemosyne-hermes==0.5.0
 
 COPY mnemosyne-bootstrap.sh /usr/local/bin/mnemosyne-bootstrap.sh
 RUN chmod +x /usr/local/bin/mnemosyne-bootstrap.sh

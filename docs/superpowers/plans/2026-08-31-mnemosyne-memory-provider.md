@@ -68,12 +68,20 @@ mkdir -p "$HERMES_HOME/plugins/mnemosyne"
 
 PKG_DIR="$("$VENV/bin/python" -c \
   'import pathlib, mnemosyne_hermes; print(pathlib.Path(mnemosyne_hermes.__file__).resolve().parent)')"
+
+if [ -z "$PKG_DIR" ] || [ ! -d "$PKG_DIR" ]; then
+  echo "mnemosyne-bootstrap: PKG_DIR is empty or not a directory ('$PKG_DIR') — refusing to symlink, aborting" >&2
+  exit 1
+fi
+
 ln -sfn "$PKG_DIR"/* "$HERMES_HOME/plugins/mnemosyne/"
 
 "$VENV/bin/hermes" config set memory.provider mnemosyne
 
 exec gateway run
 ```
+
+(This guard was added after a code-quality review caught a real risk: without it, an empty `$PKG_DIR` — which `set -e` does not catch, since a command substitution can succeed with empty output — turns the `ln -sfn "$PKG_DIR"/*` glob into `ln -sfn /*`, symlinking the entire root filesystem into the plugin directory.)
 
 - [ ] **Step 2: Make it executable locally (git preserves the mode bit on push)**
 
