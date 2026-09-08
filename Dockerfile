@@ -20,3 +20,16 @@ RUN uv pip install --python /opt/hermes/.venv/bin/python mnemosyne-hermes==0.5.0
 
 COPY mnemosyne-bootstrap.sh /usr/local/bin/mnemosyne-bootstrap.sh
 RUN chmod +x /usr/local/bin/mnemosyne-bootstrap.sh
+
+# Playwright + Chromium: gives dedicated scripts (invoked via hermes's
+# code_execution tool, e.g. the Banco Galicia sync) a real browser to
+# drive. This is NOT wired into hermes's own "browser" toolset — that
+# toolset only knows how to talk to paid cloud backends (Browserbase,
+# Browser-Use Cloud, Firecrawl), confirmed via `hermes plugins list`.
+# See docs/superpowers/specs/2026-09-08-playwright-chromium-runtime-design.md.
+#
+# beautifulsoup4 is installed alongside it because every script that
+# needs a real browser also needs to parse the HTML it renders — the
+# banking site this is built for has no clean JSON API for most pages.
+RUN uv pip install --python /opt/hermes/.venv/bin/python playwright==1.62.0 beautifulsoup4
+RUN /opt/hermes/.venv/bin/playwright install --with-deps chromium
