@@ -24,6 +24,7 @@ DRIVE_ROOT_FOLDER_ID = "1wNYrxgVJo6MPN4kc7aZK3q8qi9s9ZlJS"  # "Bancos" folder
 GALICIA_FOLDER_ID = "1R5nLrV-q8Y85pPSKLNJshs9dtAqr1EQm"  # "Bancos/Galicia"
 CUENTAS_FOLDER_ID = "1y1bRpau2km4YTdQx3Rel7dnlaCkYZgko"  # "Bancos/Galicia/Cuentas"
 TARJETAS_FOLDER_ID = "1xiVDZqs_KrTj0XnFcPa_lsoYNLWDz2l5"  # "Bancos/Galicia/Tarjetas"
+RESUMENES_FOLDER_ID = "1IbVWTMfhcLPwuA30sRCgb3IVhJIVy6_h"  # "Bancos/Galicia/Tarjetas/Resumenes"
 
 GOOGLE_API_SCRIPT = "/opt/hermes/skills/productivity/google-workspace/scripts/google_api.py"
 VENV_PYTHON = "/opt/hermes/.venv/bin/python"
@@ -165,19 +166,18 @@ def drive_find_file(name: str, parent_folder_id: str) -> str | None:
     return matches[0]["id"] if matches else None
 
 
-def sync_account_movements_csv(account_name: str, new_movements: list[dict], parent_folder_id: str) -> None:
-    """Downloads the existing CSV for this account (if any), merges in
-    only movements not already present (deduped by date+description+amount),
-    and re-uploads. Deletes the old Drive file first, then uploads the
-    merged version — `drive upload` has no in-place overwrite mode, only
-    create, so this delete-then-upload approach avoids leaving duplicate
-    same-named files (behavior confirmed empirically in Task 5's live
-    end-to-end test).
+def sync_csv(filename: str, fieldnames: list[str], new_records: list[dict], parent_folder_id: str) -> None:
+    """Downloads the existing CSV at this name under parent_folder_id (if
+    any), merges in only records not already present (deduped by the full
+    row tuple), and re-uploads. Deletes the old Drive file first, then
+    uploads the merged version — `drive upload` has no in-place overwrite
+    mode, only create, so this delete-then-upload approach avoids leaving
+    duplicate same-named files (behavior confirmed empirically in Task 5's
+    live end-to-end test for account movements).
     """
-    filename = f"{slugify(account_name)}.csv"
     existing_file_id = drive_find_file(filename, parent_folder_id)
 
-    existing_rows: set[tuple[str, str, str]] = set()
+    existing_rows: set[tuple] = set()
     local_path = f"/tmp/{filename}"
 
     if existing_file_id:
@@ -187,19 +187,19 @@ def sync_account_movements_csv(account_name: str, new_movements: list[dict], par
         )
         with open(local_path, encoding="utf-8") as f:
             for row in csv.DictReader(f):
-                existing_rows.add((row["date"], row["description"], row["amount"]))
+                existing_rows.add(tuple(row[k] for k in fieldnames))
 
-    new_rows = {(m["date"], m["description"], m["amount"]) for m in new_movements}
+    new_rows = {tuple(r[k] for k in fieldnames) for r in new_records}
     all_rows = existing_rows | new_rows
 
     if all_rows == existing_rows and existing_file_id:
         return  # nothing new, nothing to upload
 
     with open(local_path, "w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["date", "description", "amount"])
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         for row in sorted(all_rows):
-            writer.writerow({"date": row[0], "description": row[1], "amount": row[2]})
+            writer.writerow(dict(zip(fieldnames, row)))
 
     if existing_file_id:
         subprocess.run(
@@ -213,6 +213,245 @@ def sync_account_movements_csv(account_name: str, new_movements: list[dict], par
         capture_output=True, text=True, check=True,
     )
     os.remove(local_path)
+
+
+def sync_account_movements_csv(account_name: str, new_movements: list[dict], parent_folder_id: str) -> None:
+    sync_csv(f"{slugify(account_name)}.csv", ["date", "description", "amount"], new_movements, parent_folder_id)
+
+
+CARDS_URL = "https://onlinebanking.bancogalicia.com.ar/navigation/menulink/390"
+
+
+def discover_cards(page: Page) -> list[dict]:
+    """Returns a list of {"index": int, "last4": str} for each card found
+    on the cards overview page, in carousel-slide order. Confirmed real
+    structure: the cards overview renders each card as a slide in a slick
+    carousel (three dots at `.slick-dots li button`, text "0"/"1"/"2");
+    each slide has its own div.card-number-container showing
+    "**** **** **** NNNN". "index" is the slide index to pass to
+    switch_active_card to bring that card's movements/statements into
+    view — the page only ever shows one card's MOVIMIENTOS/Resumen data
+    at a time, for whichever slide is active.
+    """
+    page.goto(CARDS_URL)
+    page.wait_for_load_state("networkidle")
+    soup = BeautifulSoup(page.content(), "html.parser")
+
+    cards = []
+    for i, container in enumerate(soup.find_all("div", class_="card-number-container")):
+        digits = container.get_text(strip=True).replace("*", "").strip()
+        if digits:
+            cards.append({"index": i, "last4": digits})
+    return cards
+
+
+def switch_active_card(page: Page, index: int) -> None:
+    """Clicks the given slide's dot in the cards carousel so its
+    movements/statements become the ones shown on the page. Must be
+    called (with a page already on CARDS_URL) before reading movements or
+    statements for any card other than the default (index 0) one."""
+    page.evaluate(
+        """(i) => {
+            const dots = document.querySelectorAll('.slick-dots li button');
+            if (dots[i]) dots[i].click();
+        }""",
+        index,
+    )
+    page.wait_for_load_state("networkidle")
+    page.wait_for_timeout(1000)  # let the movements/resumen panel re-render for the new slide
+
+
+def get_card_movements_html(page: Page, card_index: int) -> str:
+    """Navigates to the cards overview page, switches to the given card's
+    carousel slide, then clicks "Mostrar más" (a pure client-side route
+    change, confirmed via live network-request logging to fire no API
+    call) repeatedly, up to a small bounded number of iterations, to load
+    the full movements table before returning the page's HTML.
+    """
+    page.goto(CARDS_URL)
+    page.wait_for_load_state("networkidle")
+    switch_active_card(page, card_index)
+    for _ in range(20):
+        clicked = page.evaluate(
+            """() => {
+                const link = Array.from(document.querySelectorAll('a'))
+                    .find(a => a.textContent.trim() === 'Mostrar más');
+                if (link) { link.click(); return true; }
+                return false;
+            }"""
+        )
+        if not clicked:
+            break
+        page.wait_for_timeout(800)
+    return page.content()
+
+
+def parse_card_movements(html: str) -> list[dict]:
+    """Returns a list of {"date", "card", "description", "installments",
+    "amount_ars", "amount_usd"} for each row in the card movements table.
+
+    Confirmed real structure: a div.react-bootstrap-table wraps a <table>
+    whose <tbody><tr> rows have 6 <td> cells matching the header order
+    Fecha/Tarjeta/Descripción/Cuotas/Importe en pesos/Importe en dólares.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    wrapper = soup.find("div", class_="react-bootstrap-table")
+    if not wrapper or not wrapper.table or not wrapper.table.tbody:
+        return []
+
+    movements = []
+    for row in wrapper.table.tbody.find_all("tr", recursive=False):
+        cells = row.find_all("td", recursive=False)
+        if len(cells) < 6:
+            continue
+        values = [c.get_text(strip=True) for c in cells]
+        movements.append({
+            "date": values[0],
+            "card": values[1],
+            "description": values[2],
+            "installments": values[3],
+            "amount_ars": values[4],
+            "amount_usd": values[5],
+        })
+    return movements
+
+
+def sync_card_movements_csv(last4: str, new_movements: list[dict], parent_folder_id: str) -> None:
+    sync_csv(
+        f"tarjeta_{last4}.csv",
+        ["date", "card", "description", "installments", "amount_ars", "amount_usd"],
+        new_movements,
+        parent_folder_id,
+    )
+
+
+def get_statement_rows_html(page: Page, card_index: int) -> str:
+    """Navigates to the cards overview page, switches to the given card's
+    carousel slide, then its Resumen tab and Resúmenes mensuales sub-tab,
+    waiting for each to actually render (confirmed via live testing that a
+    fixed networkidle wait isn't enough — the tab content, including the
+    buttons this clicks, renders slightly after that), and returns the
+    resulting HTML once the statements table has real rows.
+
+    Returns "" if no "Resumen" tab ever appears — confirmed live for a
+    card with no recent activity, which apparently doesn't get a separate
+    statements section at all. That's treated as "zero statements to
+    sync", not an error.
+    """
+    page.goto(CARDS_URL)
+    page.wait_for_load_state("networkidle")
+    switch_active_card(page, card_index)
+
+    try:
+        page.wait_for_function(
+            """() => Array.from(document.querySelectorAll('button')).some(b => b.textContent.includes('Resumen'))""",
+            timeout=15000,
+        )
+    except Exception:
+        return ""
+    page.evaluate(
+        """() => {
+            const btn = Array.from(document.querySelectorAll('button')).find(b => b.textContent.includes('Resumen'));
+            if (btn) btn.click();
+        }"""
+    )
+    page.wait_for_load_state("networkidle")
+
+    page.wait_for_function(
+        """() => Array.from(document.querySelectorAll('button')).some(b => b.textContent.includes('Mostrar resúmenes mensuales'))""",
+        timeout=15000,
+    )
+    page.evaluate(
+        """() => {
+            const btn = Array.from(document.querySelectorAll('button')).find(b => b.textContent.includes('Mostrar resúmenes mensuales'));
+            if (btn) btn.click();
+        }"""
+    )
+    page.wait_for_load_state("networkidle")
+    page.wait_for_selector("table tbody tr", timeout=15000)
+    return page.content()
+
+
+def parse_statement_rows(html: str) -> list[dict]:
+    """Returns a list of {"index": int, "date": str, "month": str,
+    "year": str} for each monthly statement row, in table order —
+    "index" matches the row's position for download_statement_pdf.
+    Confirmed real structure:
+    same div.react-bootstrap-table wrapper as the movements table, with
+    columns Fecha/Mes/Año/(download menu)."""
+    soup = BeautifulSoup(html, "html.parser")
+    wrapper = soup.find("div", class_="react-bootstrap-table")
+    if not wrapper or not wrapper.table or not wrapper.table.tbody:
+        return []
+
+    rows = []
+    for i, tr in enumerate(wrapper.table.tbody.find_all("tr", recursive=False)):
+        cells = tr.find_all("td", recursive=False)
+        if len(cells) < 3:
+            continue
+        rows.append({
+            "index": i,
+            "date": cells[0].get_text(strip=True),
+            "month": cells[1].get_text(strip=True),
+            "year": cells[2].get_text(strip=True),
+        })
+    return rows
+
+
+def download_statement_pdf(page: Page, row_index: int, local_path: str) -> None:
+    """Downloads one monthly statement PDF via its row's dropdown menu
+    "Descargar resumen" link.
+
+    Confirmed real structure: that menu item is an <a title="Descargar
+    resumen"> already present in the DOM for every row (not lazily
+    rendered on menu-open), so clicking it directly via JS — bypassing
+    Playwright's visibility-actionability checks, which failed in earlier
+    testing because this framework doesn't toggle a standard "open"
+    attribute on the menu wrapper when its "..." button is clicked — is
+    the confirmed-working approach. This replaces the original plan of
+    calling /api/resumen/list + /api/resumen/getresumen directly with
+    `requests`: that returned an HTTP 500 (likely missing browser-set
+    headers) when tried with the session's cookies during reconnaissance.
+    """
+    with page.expect_download(timeout=30000) as download_info:
+        page.evaluate(
+            """(rowIndex) => {
+                const rows = document.querySelectorAll('.react-bootstrap-table table tbody tr');
+                const row = rows[rowIndex];
+                if (!row) return;
+                const link = Array.from(row.querySelectorAll('a')).find(a => (a.title || '').includes('Descargar'));
+                if (link) link.click();
+            }""",
+            row_index,
+        )
+    download = download_info.value
+    download.save_as(local_path)
+
+
+def sync_card_statements(page: Page, card_index: int, last4: str, resumenes_folder_id: str) -> None:
+    """Syncs every monthly statement PDF for the given card to
+    resumenes_folder_id, skipping any whose filename already exists there
+    (statements don't change once issued, so name-based dedup is enough —
+    no need to download-and-compare like the movements CSVs)."""
+    html = get_statement_rows_html(page, card_index)
+    for row in parse_statement_rows(html):
+        # Full date (not just month/year) avoids filename collisions when
+        # two statements land in the same month — confirmed to happen for
+        # real (two distinct "Julio 2026" rows with different day-of-month
+        # dates were found live for one card).
+        date_slug = row["date"].replace("/", "-")
+        filename = f"{last4}_{date_slug}_{slugify(row['month'])}.pdf"
+        if drive_find_file(filename, resumenes_folder_id):
+            continue
+
+        local_path = f"/tmp/{filename}"
+        download_statement_pdf(page, row["index"], local_path)
+        subprocess.run(
+            [VENV_PYTHON, GOOGLE_API_SCRIPT, "drive", "upload", local_path,
+             "--name", filename, "--parent", resumenes_folder_id],
+            capture_output=True, text=True, check=True,
+        )
+        os.remove(local_path)
 
 
 def main() -> int:
@@ -237,6 +476,23 @@ def main() -> int:
                         failures.append(f"cuenta {account['name']}: {e}")
             except Exception as e:
                 failures.append(f"descubrimiento de cuentas: {e}")
+
+            try:
+                cards = discover_cards(page)
+                for card in cards:
+                    index, last4 = card["index"], card["last4"]
+                    try:
+                        movements_html = get_card_movements_html(page, index)
+                        movements = parse_card_movements(movements_html)
+                        sync_card_movements_csv(last4, movements, TARJETAS_FOLDER_ID)
+                    except Exception as e:
+                        failures.append(f"movimientos tarjeta {last4}: {e}")
+                    try:
+                        sync_card_statements(page, index, last4, RESUMENES_FOLDER_ID)
+                    except Exception as e:
+                        failures.append(f"resumenes tarjeta {last4}: {e}")
+            except Exception as e:
+                failures.append(f"descubrimiento de tarjetas: {e}")
 
             if failures:
                 print("Galicia: sync parcial, falló: " + "; ".join(failures))
