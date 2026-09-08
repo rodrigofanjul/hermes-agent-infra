@@ -67,7 +67,13 @@ ya está corriendo y lo usa como único proveedor de modelo (ver sección 9).
   se construye con `build: .` a partir del `Dockerfile` de este repo,
   que a su vez fija el tag base en su línea `FROM`. Ver
   `docs/superpowers/specs/2026-08-31-mnemosyne-memory-provider-design.md`
-  para el porqué. Imagen de
+  para el porqué. Ese mismo `Dockerfile` también instala Playwright +
+  Chromium + `beautifulsoup4` (para scripts propios que necesiten un
+  navegador real y parsear HTML — ver
+  `docs/superpowers/specs/2026-09-08-playwright-chromium-runtime-design.md`);
+  el servicio `hermes` tiene `shm_size: "1gb"` en el compose por esto
+  mismo (Chromium crashea con el `/dev/shm` de 64MB que trae Docker por
+  default). Imagen de
   `hermes-webui` fijada a `0.52.264` — es un tag del track
   **experimental** del proyecto, no del track "estable" (`vX.Y.Z`), porque
   el track estable todavía no absorbió el fix de compatibilidad que este
@@ -426,7 +432,10 @@ Procedimiento completo para actualizar `hermes-agent`:
    todavía requiere recrear `hermes-agent-src` o el build nuevo queda
    invisible detrás del volumen viejo. Confirmado empíricamente: el
    primer deploy de Mnemosyne en este repo crasheó exactamente por
-   saltarse este paso.
+   saltarse este paso — y volvió a pasar (mismo síntoma, mismo fix)
+   al agregar Playwright/Chromium, porque sus binarios y el venv de
+   Playwright también viven dentro de ese volumen. Cualquier cambio al
+   `Dockerfile`, sin importar qué instale, requiere este paso.
 5. Confirmá en **Runtime Logs** de `hermes-webui` que el arranque
    instala las dependencias sin el error de "Building wheels or sdists...
    is not supported" (si aparece, `hermes-webui` quedó desalineado con

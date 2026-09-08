@@ -44,6 +44,9 @@ services:
   hermes:
     build: .
     container_name: hermes
+    # Chromium (via Playwright, see Dockerfile) crashes randomly under
+    # Docker's default 64MB /dev/shm — 1gb is the standard fix for a
+    # single headless instance running occasional scraping scripts.
     shm_size: "1gb"
     command: ["/usr/local/bin/mnemosyne-bootstrap.sh"]
     restart: unless-stopped

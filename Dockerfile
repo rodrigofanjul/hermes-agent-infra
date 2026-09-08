@@ -31,5 +31,5 @@ RUN chmod +x /usr/local/bin/mnemosyne-bootstrap.sh
 # beautifulsoup4 is installed alongside it because every script that
 # needs a real browser also needs to parse the HTML it renders — the
 # banking site this is built for has no clean JSON API for most pages.
-RUN uv pip install --python /opt/hermes/.venv/bin/python playwright==1.62.0 beautifulsoup4
+RUN uv pip install --python /opt/hermes/.venv/bin/python playwright==1.62.0 beautifulsoup4==4.15.0
 RUN /opt/hermes/.venv/bin/playwright install --with-deps chromium
