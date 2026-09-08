@@ -42,3 +42,8 @@ scratchpad/
 # can contain sensitive data captured during manual browser exploration
 # (e.g. real bank statement PDFs). Never meant to be committed.
 .playwright-mcp/
+
+# Raw HTML/PDF captured live from real banking sessions during Galicia
+# sync development — contains real account numbers/balances/movements.
+# Only sanitized, hand-authored *_sample.html fixtures are committed.
+scripts/fixtures/raw_capture*/

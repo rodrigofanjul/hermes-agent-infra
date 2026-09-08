@@ -1,0 +1,41 @@
+<!--
+Hand-authored fixture mimicking the real structure of an account's
+movements page, confirmed via live capture on 2026-09-08 (see the
+Galicia sync implementation plan, Task 3). All names/dates/amounts
+below are fabricated — no real account data.
+-->
+<!DOCTYPE html>
+<html>
+<head><title>Tus Cuentas | Online Banking</title></head>
+<body>
+<div class="table-container table-capitalize push-top-15" id="ContenedorMovimientos" data-hj-masked="">
+  <div role="button" tabindex="0" id="1" data-comment="" class="table-row cursor-p no-padding-right">
+    <div class="col-md-2 col-sm-2 detalle-movimiento hidden-xs" data-hj-masked="">01/09/2026</div>
+    <div class="col-md-7 col-xs-9 col-sm-7 table-detail no-padding-left-mobile detalle-movimiento" data-hj-masked="">Pago tarjeta visa</div>
+    <div class="col-md-3 col-xs-3 col-ms-3 text-right no-padding-right-mobile detalle-movimiento">
+      <span aria-hidden="true" role="tooltip" class="tooltip-saldo table-detail line-height-25" title="">-$100,00</span>
+      <span class="sr-only" style="width: auto;">-100,00 pesos</span>
+    </div>
+    <div class="col-xs-12 detalle-movimiento visible-xs no-padding-left-mobile" data-hj-masked="">01/09/2026</div>
+  </div>
+  <div role="button" tabindex="0" id="2" data-comment="" class="table-row cursor-p no-padding-right">
+    <div class="col-md-2 col-sm-2 detalle-movimiento hidden-xs" data-hj-masked="">15/08/2026</div>
+    <div class="col-md-7 col-xs-9 col-sm-7 table-detail no-padding-left-mobile detalle-movimiento" data-hj-masked="">Transferencia recibida</div>
+    <div class="col-md-3 col-xs-3 col-ms-3 text-right no-padding-right-mobile detalle-movimiento">
+      <span aria-hidden="true" role="tooltip" class="tooltip-saldo table-detail line-height-25" title=""><label>$5.000,00</label></span>
+      <span class="sr-only" style="width: auto;">5.000,00 pesos</span>
+    </div>
+    <div class="col-xs-12 detalle-movimiento visible-xs no-padding-left-mobile" data-hj-masked="">15/08/2026</div>
+  </div>
+  <div role="button" tabindex="0" id="3" data-comment="" class="table-row cursor-p no-padding-right">
+    <div class="col-md-2 col-sm-2 detalle-movimiento hidden-xs" data-hj-masked="">02/08/2026</div>
+    <div class="col-md-7 col-xs-9 col-sm-7 table-detail no-padding-left-mobile detalle-movimiento" data-hj-masked="">Interes capitalizado</div>
+    <div class="col-md-3 col-xs-3 col-ms-3 text-right no-padding-right-mobile detalle-movimiento">
+      <span aria-hidden="true" role="tooltip" class="tooltip-saldo table-detail line-height-25" title=""><label>$0,07</label></span>
+      <span class="sr-only" style="width: auto;">0,07 pesos</span>
+    </div>
+    <div class="col-xs-12 detalle-movimiento visible-xs no-padding-left-mobile" data-hj-masked="">02/08/2026</div>
+  </div>
+</div>
+</body>
+</html>
