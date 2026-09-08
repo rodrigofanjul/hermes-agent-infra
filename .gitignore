@@ -37,3 +37,8 @@ desktop.ini
 *.tmp
 .scratch/
 scratchpad/
+
+# Playwright MCP session artifacts (page snapshots, downloaded files) —
+# can contain sensitive data captured during manual browser exploration
+# (e.g. real bank statement PDFs). Never meant to be committed.
+.playwright-mcp/
