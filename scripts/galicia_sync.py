@@ -32,9 +32,9 @@ def login(page: Page) -> bool:
         return False
 
     page.goto(LOGIN_URL)
-    page.locator("#DocumentNumber").fill(dni)
-    page.locator("#UserName").fill(user)
-    page.locator("#Password").fill(password)
+    page.locator("#DocumentNumber").type(dni, delay=30)
+    page.locator("#UserName").type(user, delay=30)
+    page.locator("#Password").type(password, delay=30)
     page.get_by_role("button", name="iniciar sesión").click()
     page.wait_for_load_state("networkidle")
 
