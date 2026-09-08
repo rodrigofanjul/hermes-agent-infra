@@ -21,6 +21,9 @@ from playwright.sync_api import sync_playwright, Page
 LOGIN_URL = "https://onlinebanking.bancogalicia.com.ar/login"
 ACCOUNTS_URL = "https://onlinebanking.bancogalicia.com.ar/navigation/menulink/2"
 DRIVE_ROOT_FOLDER_ID = "1wNYrxgVJo6MPN4kc7aZK3q8qi9s9ZlJS"  # "Bancos" folder
+GALICIA_FOLDER_ID = "1R5nLrV-q8Y85pPSKLNJshs9dtAqr1EQm"  # "Bancos/Galicia"
+CUENTAS_FOLDER_ID = "1y1bRpau2km4YTdQx3Rel7dnlaCkYZgko"  # "Bancos/Galicia/Cuentas"
+TARJETAS_FOLDER_ID = "1xiVDZqs_KrTj0XnFcPa_lsoYNLWDz2l5"  # "Bancos/Galicia/Tarjetas"
 
 GOOGLE_API_SCRIPT = "/opt/hermes/skills/productivity/google-workspace/scripts/google_api.py"
 VENV_PYTHON = "/opt/hermes/.venv/bin/python"
@@ -221,7 +224,23 @@ def main() -> int:
                 print("Galicia: no se pudo iniciar sesión, revisar manualmente")
                 return 1
 
-            # Extraction steps land here in later tasks of this plan.
+            failures = []
+
+            try:
+                accounts = discover_accounts(page)
+                for account in accounts:
+                    try:
+                        html = get_account_movements_html(page, account)
+                        movements = parse_movements(html)
+                        sync_account_movements_csv(account["name"], movements, CUENTAS_FOLDER_ID)
+                    except Exception as e:
+                        failures.append(f"cuenta {account['name']}: {e}")
+            except Exception as e:
+                failures.append(f"descubrimiento de cuentas: {e}")
+
+            if failures:
+                print("Galicia: sync parcial, falló: " + "; ".join(failures))
+                return 1
 
             return 0
         finally:
