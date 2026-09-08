@@ -44,6 +44,7 @@ services:
   hermes:
     build: .
     container_name: hermes
+    shm_size: "1gb"
     command: ["/usr/local/bin/mnemosyne-bootstrap.sh"]
     restart: unless-stopped
     # No cap_drop/security_opt/mem_limit hardening here, unlike
