@@ -404,7 +404,12 @@ def test_get_loan_installments_uses_spa_link_and_all_filter():
 
     mocked_navigate.assert_called_once_with(page)
     page.locator.assert_called_once_with('a[href="/loans/abc123"]')
-    page.get_by_role.assert_called_once_with("radio", name="Todas las cuotas")
+    page.get_by_role.assert_called_once_with(
+        "radio", name="Todas las cuotas", exact=True
+    )
+    page.wait_for_load_state.assert_not_called()
+    assert page.wait_for_function.call_count == 2
+    assert "table tbody tr" in page.wait_for_function.call_args_list[1].args[0]
     page.goto.assert_not_called()
     assert html == page.content.return_value
 

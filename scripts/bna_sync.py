@@ -532,9 +532,28 @@ def get_loan_installments_html(page: Page, loan: dict) -> str:
         }""",
         timeout=20000,
     )
-    page.get_by_role("radio", name="Todas las cuotas").click()
-    page.wait_for_load_state("networkidle")
-    page.wait_for_selector("table tbody", timeout=15000)
+    page.get_by_role("radio", name="Todas las cuotas", exact=True).click()
+    page.wait_for_function(
+        """() => new Promise(resolve => {
+            let lastCount = -1;
+            let stableSince = Date.now();
+            const poll = () => {
+                const count = document.querySelectorAll('table tbody tr').length;
+                if (count > 0) {
+                    if (count !== lastCount) {
+                        lastCount = count;
+                        stableSince = Date.now();
+                    } else if (Date.now() - stableSince >= 1500) {
+                        resolve(true);
+                        return;
+                    }
+                }
+                setTimeout(poll, 100);
+            };
+            poll();
+        })""",
+        timeout=20000,
+    )
     return page.content()
 
 
