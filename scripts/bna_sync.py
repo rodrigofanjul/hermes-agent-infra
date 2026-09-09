@@ -16,6 +16,11 @@ from playwright.sync_api import sync_playwright, Page
 
 LOGIN_STEP1_URL = "https://digital.bna.com.ar/loginStep1"
 DRIVE_ROOT_FOLDER_ID = "1wNYrxgVJo6MPN4kc7aZK3q8qi9s9ZlJS"  # "Bancos" folder
+BNA_FOLDER_ID = "1Pt0FPSeV8xxSg3-rcJ33ImGmIF6tV45O"  # "Bancos/BNA"
+CUENTAS_FOLDER_ID = "1iNtZBCxBfA54eQF9GB78tEOeO3jQZdnn"  # "Bancos/BNA/Cuentas"
+TARJETAS_FOLDER_ID = "1OcoYvPEslra2fOmVyBAQVG0cHkIg-J7N"  # "Bancos/BNA/Tarjetas"
+PRESTAMOS_FOLDER_ID = "1lZCMmiBgFI1EpLOP9IZSaaEznrpkE03a"  # "Bancos/BNA/Prestamos"
+RESUMENES_FOLDER_ID = "1-L1eTzrqwDofB_adSUt1pfXro_rZ5K2A"  # "Bancos/BNA/Tarjetas/Resumenes"
 
 
 def login(page: Page) -> bool:
