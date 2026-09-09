@@ -146,6 +146,10 @@ def inspect_loans(page) -> None:
             print(f"LOAN ordinal={ordinal} error={type(exc).__name__}")
 
 
+def should_inspect_loans(arguments: list[str]) -> bool:
+    return "--cards-only" not in arguments
+
+
 def main() -> int:
     with sync_playwright() as p:
         browser = p.chromium.launch(args=["--no-sandbox"])
@@ -170,7 +174,8 @@ def main() -> int:
                 return 1
             print(f"RESULT login_ok path={sanitized_path(page.url)}")
             inspect_cards(page)
-            inspect_loans(page)
+            if should_inspect_loans(sys.argv[1:]):
+                inspect_loans(page)
             print("RESULT diagnostic_complete")
             return 0
         finally:

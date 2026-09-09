@@ -5,7 +5,7 @@ import os
 from unittest.mock import MagicMock, Mock, mock_open, patch
 
 from bna_diagnose_accounts import sanitized_path
-from bna_diagnose_sections import inspect_cards
+from bna_diagnose_sections import inspect_cards, should_inspect_loans
 from bna_sync import (
     BNADataUnavailableError,
     classify_accounts_html,
@@ -509,6 +509,11 @@ def test_section_diagnostic_waits_for_cards_before_counting():
     page.wait_for_selector.assert_called_once_with('[id^="card-"]', timeout=30000)
 
 
+def test_section_diagnostic_cards_only_skips_loans():
+    assert should_inspect_loans(["--cards-only"]) is False
+    assert should_inspect_loans([]) is True
+
+
 if __name__ == "__main__":
     test_discover_accounts_from_fixture()
     test_parse_account_movements_from_fixture()
@@ -547,3 +552,4 @@ if __name__ == "__main__":
     test_authenticated_sync_failure_messages_do_not_expose_identifiers()
     test_section_diagnostic_never_reads_or_transfers_financial_data()
     test_section_diagnostic_waits_for_cards_before_counting()
+    test_section_diagnostic_cards_only_skips_loans()
