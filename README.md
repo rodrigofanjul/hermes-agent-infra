@@ -613,3 +613,41 @@ no dejan loguear**
   a mano (sección 9). Ver
   [docs/superpowers/specs/2026-08-26-hermes-agent-infra-design.md](docs/superpowers/specs/2026-08-26-hermes-agent-infra-design.md)
   para el diseño original de un solo contenedor.
+
+## 14. Scripts propios y cron jobs
+
+**[`scripts/galicia_sync.py`](scripts/galicia_sync.py)** hace el backup
+diario de Banco Galicia (cuentas, movimientos de cuenta, movimientos de
+tarjeta y resúmenes en PDF) a Google Drive (`Bancos/Galicia/...`), sin
+que el LLM toque nunca las credenciales — usa Playwright para loguearse
+y navegar el sitio real, y `google_api.py` (skill existente) para subir
+todo a Drive. Diseño completo en
+[docs/superpowers/specs/2026-09-08-galicia-sync-design.md](docs/superpowers/specs/2026-09-08-galicia-sync-design.md).
+
+- **Credenciales:** `GALICIA_DNI`, `GALICIA_USER`, `GALICIA_PASSWORD` en
+  las env vars de Coolify (sección 3) — nunca en este repo.
+- **Deploy:** el script vive en `/opt/data/scripts/galicia_sync.py`
+  (volumen `hermes-data`, persistente) — **no** se copia automáticamente
+  en ningún build/deploy. Si ese volumen se pierde o se recrea, hay que
+  volver a copiarlo a mano:
+
+  ```bash
+  ssh opc@oracle-us-west "sudo docker exec <hermes-container> mkdir -p /opt/data/scripts"
+  scp scripts/galicia_sync.py opc@oracle-us-west:/tmp/galicia_sync.py
+  ssh opc@oracle-us-west "sudo docker cp /tmp/galicia_sync.py <hermes-container>:/opt/data/scripts/galicia_sync.py"
+  ```
+
+- **Cron job:** `Sync Galicia`, corre todos los días a las 9am hora
+  Argentina (`0 12 * * *` UTC — el scheduler de hermes opera en UTC),
+  como job `--no-agent` (el script ES el job, no un prompt para el
+  agente): stdout vacío = corrida silenciosa y exitosa; cualquier texto
+  impreso se entrega por WhatsApp vía `--deliver origin` (falla de login
+  o de alguna sección puntual — el resto sigue corriendo igual).
+  Registrado con:
+
+  ```bash
+  hermes cron create '0 12 * * *' --name 'Sync Galicia' --script galicia_sync.py --no-agent --deliver origin
+  ```
+
+- **Rollback:** `hermes cron remove 'Sync Galicia'` desregistra el job
+  sin afectar nada más (Mnemosyne, Playwright, u otros cron jobs).
