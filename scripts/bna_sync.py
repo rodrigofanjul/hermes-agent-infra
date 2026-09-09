@@ -90,6 +90,21 @@ def logout(page: Page) -> None:
 ACCOUNTS_URL = "https://digital.bna.com.ar/accounts/myaccounts"
 
 
+class BNADataUnavailableError(RuntimeError):
+    """BNA authenticated the session but did not provide usable account data."""
+
+
+def classify_accounts_html(html: str) -> list[dict]:
+    accounts = discover_accounts_from_html(html)
+    if accounts:
+        return accounts
+
+    text = BeautifulSoup(html, "html.parser").get_text(" ", strip=True)
+    if "Mis Cuentas (0)" in text or "ninguna cuenta abierta" in text:
+        raise BNADataUnavailableError("BNA respondió con cero cuentas")
+    raise BNADataUnavailableError("la sección Cuentas no terminó de cargar")
+
+
 def discover_accounts_from_html(html: str) -> list[dict]:
     """Pure HTML-parsing half of discover_accounts — see its docstring
     for the confirmed real structure. Split out so it's testable
@@ -115,7 +130,7 @@ def discover_accounts(page: Page) -> list[dict]:
     get_account_detail_html)."""
     page.goto(ACCOUNTS_URL)
     page.wait_for_load_state("networkidle")
-    return discover_accounts_from_html(page.content())
+    return classify_accounts_html(page.content())
 
 
 def get_account_detail_html(page: Page, account: dict) -> str:
@@ -174,6 +189,13 @@ def parse_account_balance(html: str) -> str:
         return ""
     match = re.match(r"([\d.,]+)", el.get("aria-label", "").strip())
     return match.group(1) if match else ""
+
+
+def validate_account_detail(movements: list[dict], balance: str) -> None:
+    if not balance:
+        raise BNADataUnavailableError("BNA no proporcionó el saldo de la cuenta")
+    if not movements:
+        raise BNADataUnavailableError("BNA no proporcionó movimientos de la cuenta")
 
 
 def slugify(name: str) -> str:
@@ -273,8 +295,9 @@ def main() -> int:
                     try:
                         html = get_account_detail_html(page, account)
                         movements = parse_bank_table(html, ["date", "receipt", "description", "amount"])
-                        sync_account_movements_csv(account["name"], movements, CUENTAS_FOLDER_ID)
                         balance = parse_account_balance(html)
+                        validate_account_detail(movements, balance)
+                        sync_account_movements_csv(account["name"], movements, CUENTAS_FOLDER_ID)
                         sync_account_balance_csv(account["name"], balance, CUENTAS_FOLDER_ID)
                     except Exception as e:
                         failures.append(f"cuenta {account['name']}: {e}")
