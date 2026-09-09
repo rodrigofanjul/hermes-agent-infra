@@ -91,35 +91,47 @@ y con el usuario logueado manualmente. Hallazgos:
   todo el período actual de una vez, a diferencia de las tarjetas de
   Galicia) y **Resúmenes** (lista de 12 meses, cada uno con un botón de
   descarga accesible con nombre "Descargar").
-  - **Confirmado en una segunda sesión de reconocimiento**: la causa
-    real del corte de sesión fue usar un click JS crudo
-    (`element.click()` vía `page.evaluate`) en vez de un click real de
-    Playwright — eso deja al backend/frontend en un estado inconsistente
-    (probablemente porque el manejador de descarga del sitio depende de
-    un evento de click "de verdad", con `isTrusted: true`, para abrir el
-    stream de descarga correctamente). Usando `page.get_by_role("button",
-    name="Descargar").click()` (un click real, no vía `evaluate`) dentro
-    de `page.expect_download()`, la descarga funciona: dispara
-    `POST /api/v1/execute/historicalStatement.download` (mismo patrón de
-    auth por bearer JWT) y el PDF real baja sin problema
-    (`NATIVA_INTERNACIONAL_MC11-F_VTO_02-Sep-26.pdf`, nombre real del
-    banco, se puede usar el `suggested_filename` de Playwright tal cual
-    en vez de construir uno propio).
-  - **Throttle confirmado en descargas consecutivas**: la 1ª descarga de
-    la sesión funciona rápido (~2s); una 2ª descarga inmediatamente
-    después falla dos veces seguidas con un error genérico del backend
-    (`{"code": "BAK001E", "message": "No pudimos realizar la
-    operación..."}`, ~20s de espera antes de fallar) y la página navega
-    a `/error` — la sesión general sigue viva (no es un logout, es
-    aislado a ese endpoint). **Decisión** (confirmada con el usuario):
-    no espaciar artificialmente ni limitar a 1 PDF por corrida — en vez
-    de eso, `download_statement_pdf` reintenta el click un número
-    acotado de veces (ej. 3, con una espera corta entre intentos) si la
-    página cae en `/error`, volviendo primero a la lista de resúmenes;
-    si todos los reintentos fallan para un mes puntual, se trata como
-    fallo parcial de esa sección (no aborta el resto) y el dedupe por
-    nombre de archivo hace que se reintente solo en la corrida del día
-    siguiente.
+  - **Mecanismo real confirmado, pero con comportamiento inconsistente
+    durante el reconocimiento** (4 intentos en total, en 3 sesiones
+    logueadas distintas): con un click real de Playwright
+    (`page.get_by_role("button", name="Descargar").click()`, no
+    `element.click()` vía `page.evaluate` — ambos probados) dentro de
+    `page.expect_download()`, la descarga a veces funciona limpio
+    (1 de 4 intentos: PDF real bajado en ~2s,
+    `NATIVA_INTERNACIONAL_MC11-F_VTO_02-Sep-26.pdf` — nombre real del
+    banco, usable tal cual vía `suggested_filename` sin construir uno
+    propio) y a veces falla (3 de 4 intentos): dos veces con un error
+    genérico del backend (`{"code": "BAK001E", "message": "No pudimos
+    realizar la operación..."}`, ~20s de espera, navega a `/error`,
+    sesión general sigue viva) y dos veces con `Connection closed` del
+    lado de la herramienta de exploración interactiva (Playwright MCP),
+    sin ninguna respuesta ni redirección de BNA visible — la página
+    queda en `about:blank` y a veces (no siempre) la sesión general
+    también se pierde.
+  - **No se pudo aislar una causa determinística** — ni la espera antes
+    del click (probado sin espera y con 4s de espera extra) ni si era
+    el primer o segundo intento de la sesión explican el patrón de
+    forma consistente. El `Connection closed` es un error de la
+    herramienta de exploración en sí (no un mensaje de BNA), por lo que
+    es plausible que sea una inestabilidad específica de ese puente
+    interactivo (posiblemente relacionada a cómo intercepta descargas
+    servidas vía `blob:` generadas client-side, común en apps React que
+    arman el PDF a partir de la respuesta del API) — el script real
+    corre su propio Chromium dentro del contenedor, un proceso y
+    contexto distintos, así que **puede comportarse distinto**.
+    **Decisión** (confirmada con el usuario): no seguir diagnosticando
+    con la herramienta interactiva — implementar `download_statement_pdf`
+    en `bna_sync.py` con reintento acotado (ej. 3 intentos, volviendo a
+    la lista de resúmenes entre cada uno) y probarlo empíricamente ahí,
+    que es el mecanismo real de producción. Si el mismo patrón de fallo
+    persiste en el script real, tratarlo como fallo parcial de esa
+    sección (no aborta el resto) — el dedupe por nombre de archivo hace
+    que un mes no descargado se reintente solo en la corrida del día
+    siguiente. Si tras probarlo en el script real resulta demasiado
+    frágil incluso con reintentos, es aceptable entregar el proyecto sin
+    resúmenes de tarjeta en PDF (cuentas + saldo + movimientos +
+    préstamos ya aportan valor) en vez de forzar una solución frágil —
+    documentado como fallback aceptable, no como objetivo.
   - Las tarjetas de **débito probablemente no tienen resúmenes**
     (están ligadas a una cuenta, no tienen ciclo de facturación) — a
     confirmar en la implementación; si el tab "Resúmenes" no existe
@@ -272,10 +284,16 @@ Mismo procedimiento que Galicia:
 3. Correr una segunda vez seguida, confirmar dedupe (sin cambios en
    Drive).
 4. Confirmar logout real.
-5. Confirmar en la implementación que el reintento de descarga de
-   resúmenes (ver "Reconocimiento previo") realmente recupera el PDF
-   tras un fallo `BAK001E` — probar bajando al menos 2 resúmenes
-   distintos de la misma tarjeta en una sola corrida.
+5. Probar la descarga de resúmenes directamente en `bna_sync.py`
+   (dentro del contenedor, su propio Chromium) — dado que el
+   reconocimiento con la herramienta interactiva mostró un patrón
+   inconsistente (1 de 4 intentos exitoso, ver "Reconocimiento previo"),
+   este es el primer lugar donde realmente se sabrá si el mecanismo es
+   confiable en el contexto de producción. Probar bajando al menos 2-3
+   resúmenes distintos de la misma tarjeta en una sola corrida. Si el
+   reintento acotado no alcanza y sigue fallando la mayoría de las
+   veces, aplicar el fallback documentado arriba (entregar sin
+   resúmenes PDF) en vez de seguir iterando sobre el mecanismo.
 6. Recién después, registrar el cron job real.
 
 ## Rollback
