@@ -18,7 +18,7 @@ from bna_sync import (
 def sanitized_path(url: str) -> str:
     """Return a query-free path with long opaque segments redacted."""
     path = urlsplit(url).path
-    return re.sub(r"(?<=/)[A-Za-z0-9_-]{24,}(?=/|$)", "<id>", path)
+    return re.sub(r"(?<=/)[A-Za-z0-9_%+=-]{24,}(?=/|$)", "<id>", path)
 
 
 def main() -> int:

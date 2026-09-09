@@ -141,6 +141,11 @@ def test_sanitized_path_removes_queries_and_long_identifiers():
     assert sanitized_path(url) == "/api/v1/accounts/<id>"
 
 
+def test_sanitized_path_redacts_url_encoded_identifiers():
+    url = "https://digital.bna.com.ar/cards/debitCards/detail/1%3AabcDEF123%2FghiJKL456%2BmnopQR789"
+    assert sanitized_path(url) == "/cards/debitCards/detail/<id>"
+
+
 def test_discover_cards_from_fixture():
     cards = discover_cards_from_html(_read("bna_cards_sample.html"))
     assert cards == [
@@ -527,6 +532,7 @@ if __name__ == "__main__":
     test_navigate_to_accounts_uses_internal_link_and_semantic_wait()
     test_get_account_detail_navigates_back_through_spa()
     test_sanitized_path_removes_queries_and_long_identifiers()
+    test_sanitized_path_redacts_url_encoded_identifiers()
     test_discover_cards_from_fixture()
     test_parse_card_movements_from_fixture()
     test_navigate_to_cards_uses_internal_link_and_semantic_wait()
