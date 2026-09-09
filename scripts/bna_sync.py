@@ -371,16 +371,25 @@ def sync_card_movements_csv(last4: str, movements: list[dict], parent_folder_id:
 
 
 def list_card_statements(html: str) -> list[str]:
-    """Return statement labels only from list items with a download button."""
+    """Return statement labels from list items that pair a label with a
+    download button.
+
+    Confirmed real structure: each statement row is
+    <li><p>Mes Año</p><button>...</button></li>, where the download
+    button's accessible name ("Descargar") comes from a child icon —
+    the button itself has no literal text content, so matching on
+    `button.string == "Descargar"` (the previous approach) never found
+    a match against the real site, even though it matched a fixture
+    that had guessed literal button text. Matching on structure
+    (a <li> pairing a <p> label with a <button>, with nothing else on
+    this page shaped that way) is robust to the icon's exact markup.
+    """
     soup = BeautifulSoup(html, "html.parser")
     labels = []
     for item in soup.select("li"):
-        download_button = item.find(
-            "button",
-            string=lambda value: bool(value and value.strip() == "Descargar"),
-        )
+        button = item.find("button")
         label = item.find("p")
-        if download_button and label:
+        if button and label:
             labels.append(label.get_text(strip=True))
     return labels
 
@@ -427,26 +436,30 @@ def download_statement_pdf(
 
 
 def sync_card_statements(page: Page, card: dict, resumenes_folder_id: str) -> list[str]:
-    """Upload missing card statements and return labels that could not download."""
+    """Upload missing card statements and return labels that could not download.
+
+    Confirmed real structure: the "Descargar" button's accessible name
+    comes from a child icon, not literal button text — checking
+    `button.innerText.trim() === 'Descargar'` in raw JS (the previous
+    approach) never matched the real site, so this always fell through
+    to a 30s timeout in production. Playwright's own accessible-name-
+    aware locator (already used elsewhere in this file, e.g.
+    download_statement_pdf) doesn't have that problem.
+    """
     open_card_detail(page, card)
     try:
         page.get_by_text("Resúmenes", exact=True).click(timeout=5000)
     except Exception:
         return []
     page.wait_for_load_state("networkidle")
-    page.wait_for_function(
-        """() => {
-            const text = (document.body?.innerText || '').toLocaleLowerCase('es');
-            const hasDownload = [...document.querySelectorAll('button')]
-                .some(button => button.innerText.trim() === 'Descargar');
-            return hasDownload
-                || text.includes('no tenés resúmenes')
-                || text.includes('no hay resúmenes')
-                || text.includes('todavía no tenés resúmenes')
-                || location.pathname.includes('/error');
-        }""",
-        timeout=30000,
-    )
+    try:
+        page.get_by_role("button", name="Descargar", exact=True).first.wait_for(timeout=30000)
+    except Exception:
+        if "/error" in page.url:
+            raise BNADataUnavailableError("BNA no proporcionó la lista de resúmenes")
+        # No download button ever appeared — fall through to check for
+        # the known "sin resúmenes" empty state below rather than
+        # assuming failure.
     statements_html = page.content()
     labels = list_card_statements(statements_html)
     if not labels and statements_page_is_empty(statements_html):
@@ -521,18 +534,29 @@ def discover_loans(page: Page) -> list[dict]:
 
 
 def get_loan_installments_html(page: Page, loan: dict) -> str:
-    """Open a loan through the SPA and render its complete installment history."""
+    """Open a loan through the SPA and render its complete installment history.
+
+    Confirmed real structure: the "Todas las cuotas" filter is the
+    ACCESSIBLE NAME of the radio (from an aria-label), not its visible
+    text — the rendered label users see is just "Todas". Waiting for
+    that string inside document.body.innerText (the previous approach)
+    can never match, since aria-label content isn't part of innerText —
+    that wait_for_function silently timed out every time in production,
+    which is why loan sync failed even though a manual diagnostic that
+    clicked the same radio via Playwright's own accessible-name-aware
+    locator succeeded. Using the locator directly (not a raw innerText
+    check) avoids that class of bug entirely.
+    """
     navigate_to_loans(page)
     page.locator(f'a[href="{loan["url"]}"]').click()
-    page.wait_for_function(
-        """() => {
-            const text = document.body?.innerText || '';
-            return text.includes('Todas las cuotas')
-                || location.pathname.includes('/error');
-        }""",
-        timeout=20000,
-    )
-    page.get_by_role("radio", name="Todas las cuotas", exact=True).click()
+    all_installments_radio = page.get_by_role("radio", name="Todas las cuotas", exact=True)
+    try:
+        all_installments_radio.wait_for(timeout=20000)
+    except Exception:
+        if "/error" not in page.url:
+            raise
+        return page.content()
+    all_installments_radio.click()
     page.wait_for_function(
         """() => new Promise(resolve => {
             let lastCount = -1;

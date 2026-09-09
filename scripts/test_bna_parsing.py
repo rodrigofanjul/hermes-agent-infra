@@ -407,11 +407,46 @@ def test_get_loan_installments_uses_spa_link_and_all_filter():
     page.get_by_role.assert_called_once_with(
         "radio", name="Todas las cuotas", exact=True
     )
+    radio = page.get_by_role.return_value
+    radio.wait_for.assert_called_once_with(timeout=20000)
+    radio.click.assert_called_once_with()
     page.wait_for_load_state.assert_not_called()
-    assert page.wait_for_function.call_count == 2
-    assert "table tbody tr" in page.wait_for_function.call_args_list[1].args[0]
+    # Only the stable-row-count poll remains — the radio's presence is
+    # now confirmed via the accessible-name-aware locator's own
+    # .wait_for(), not a raw innerText check inside wait_for_function.
+    assert page.wait_for_function.call_count == 1
+    assert "table tbody tr" in page.wait_for_function.call_args_list[0].args[0]
     page.goto.assert_not_called()
     assert html == page.content.return_value
+
+
+def test_get_loan_installments_falls_back_on_error_page_when_radio_never_appears():
+    page = Mock()
+    page.url = "https://digital.bna.com.ar/error"
+    page.content.return_value = "<html>error</html>"
+    page.get_by_role.return_value.wait_for.side_effect = RuntimeError("timeout")
+    loan = {"url": "/loans/abc123", "number": "0014682194"}
+
+    with patch("bna_sync.navigate_to_loans"):
+        html = get_loan_installments_html(page, loan)
+
+    page.get_by_role.return_value.click.assert_not_called()
+    assert html == page.content.return_value
+
+
+def test_get_loan_installments_reraises_when_radio_missing_off_error_page():
+    page = Mock()
+    page.url = "https://digital.bna.com.ar/loans/abc123"
+    page.get_by_role.return_value.wait_for.side_effect = RuntimeError("timeout")
+    loan = {"url": "/loans/abc123", "number": "0014682194"}
+
+    try:
+        with patch("bna_sync.navigate_to_loans"):
+            get_loan_installments_html(page, loan)
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("a missing radio off the /error page must not be swallowed")
 
 
 def test_sync_loan_installments_csv_uses_loan_number():
@@ -583,6 +618,8 @@ if __name__ == "__main__":
     test_parse_loan_installments_from_fixture()
     test_navigate_to_loans_uses_internal_link()
     test_get_loan_installments_uses_spa_link_and_all_filter()
+    test_get_loan_installments_falls_back_on_error_page_when_radio_never_appears()
+    test_get_loan_installments_reraises_when_radio_missing_off_error_page()
     test_sync_loan_installments_csv_uses_loan_number()
     test_sync_csv_uploads_replacement_before_deleting_existing_file()
     test_authenticated_sync_runs_fragile_statements_after_loans()

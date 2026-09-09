@@ -1,8 +1,18 @@
+<!--
+Hand-authored fixture mimicking the real structure of a BNA card's
+Resúmenes list. Confirmed real structure: each row is <li><p>label</p>
+<button>...</button></li>, where the button has NO literal text — its
+accessible name ("Descargar") comes from a child icon element (an
+aria-label on an inner element, exact tag/attribute not independently
+verified — deliberately not depended on here, see list_card_statements
+and sync_card_statements in bna_sync.py, which match on structure
+[label + button] rather than button text).
+-->
 <!DOCTYPE html>
 <html><body>
 <ul>
-  <li><p>Agosto 2026</p><button>Descargar</button></li>
-  <li><p>Julio 2026</p><button>Descargar</button></li>
+  <li><p>Agosto 2026</p><button><span aria-hidden="true">&#8595;</span></button></li>
+  <li><p>Julio 2026</p><button><span aria-hidden="true">&#8595;</span></button></li>
 </ul>
 <footer><ul><li><p>Términos y condiciones</p></li></ul></footer>
 </body></html>
