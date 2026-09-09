@@ -4,6 +4,7 @@ against fixture files (no live login needed)."""
 import os
 from unittest.mock import Mock
 
+from bna_diagnose_accounts import sanitized_path
 from bna_sync import (
     BNADataUnavailableError,
     classify_accounts_html,
@@ -116,6 +117,11 @@ def test_get_account_detail_navigates_back_through_spa():
     page.locator.assert_called_once_with("#account_card_number_0")
 
 
+def test_sanitized_path_removes_queries_and_long_identifiers():
+    url = "https://digital.bna.com.ar/api/v1/accounts/abcdefghijklmnopqrstuvwxyz123456?token=secret"
+    assert sanitized_path(url) == "/api/v1/accounts/<id>"
+
+
 if __name__ == "__main__":
     test_discover_accounts_from_fixture()
     test_parse_account_movements_from_fixture()
@@ -127,3 +133,4 @@ if __name__ == "__main__":
     test_validate_account_detail_rejects_empty_movements()
     test_navigate_to_accounts_uses_internal_link_and_semantic_wait()
     test_get_account_detail_navigates_back_through_spa()
+    test_sanitized_path_removes_queries_and_long_identifiers()
