@@ -651,3 +651,44 @@ todo a Drive. Diseño completo en
 
 - **Rollback:** `hermes cron remove 'Sync Galicia'` desregistra el job
   sin afectar nada más (Mnemosyne, Playwright, u otros cron jobs).
+
+**[`scripts/bna_sync.py`](scripts/bna_sync.py)** hace el mismo backup
+diario para Banco Nación (BNA+, `digital.bna.com.ar`): cuentas
+(movimientos + saldo diario), movimientos de tarjeta, resúmenes de
+tarjeta en PDF, y el historial completo de cuotas de préstamos —
+todo a `Bancos/BNA/...` en Drive. Mismo patrón que Galicia (Playwright
+y `google_api.py`, credenciales solo en env vars). Diseño en
+[docs/superpowers/specs/2026-09-09-bna-sync-design.md](docs/superpowers/specs/2026-09-09-bna-sync-design.md).
+
+- **Credenciales:** `BNA_DNI`, `BNA_USER`, `BNA_PASSWORD` en las env
+  vars de Coolify — nunca en este repo.
+- **Deploy:** igual que Galicia, en `/opt/data/scripts/bna_sync.py`
+  (volumen persistente, sin copia automática):
+
+  ```bash
+  ssh opc@oracle-us-west "sudo docker exec <hermes-container> mkdir -p /opt/data/scripts"
+  scp scripts/bna_sync.py opc@oracle-us-west:/tmp/bna_sync.py
+  ssh opc@oracle-us-west "sudo docker cp /tmp/bna_sync.py <hermes-container>:/opt/data/scripts/bna_sync.py"
+  ```
+
+- **Cron job:** `Sync BNA`, `5 12 * * *` UTC — 9am Argentina, 5 minutos
+  después de "Sync Galicia" para no competir por recursos al correr
+  ambos scripts de Playwright al mismo tiempo. Mismo contrato
+  `--no-agent --deliver origin` (stdout vacío = éxito silencioso).
+  Registrado con:
+
+  ```bash
+  hermes cron create '5 12 * * *' --name 'Sync BNA' --script bna_sync.py --no-agent --deliver origin
+  ```
+
+- **Limitación conocida:** la descarga de resúmenes de tarjeta en PDF
+  usa el mismo botón "Descargar" del sitio real, pero el backend de BNA
+  resultó intermitente en las pruebas — a veces una descarga puntual
+  falla con un error genérico y no hay forma confiable de distinguirlo
+  de un problema transitorio. El script reintenta unas pocas veces y,
+  si igual falla, lo reporta como fallo parcial (sin afectar cuentas,
+  tarjetas ni préstamos) — el resumen faltante se sincroniza solo al
+  día siguiente gracias al dedupe por nombre de archivo. Es una
+  limitación aceptada del lado de BNA, no un bug de este script.
+- **Rollback:** `hermes cron remove 'Sync BNA'` — aislado del resto,
+  no afecta a `galicia_sync.py` ni a ningún otro cron job.
