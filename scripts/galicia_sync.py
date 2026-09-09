@@ -14,6 +14,7 @@ import os
 import re
 import subprocess
 import sys
+from datetime import date
 
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright, Page
@@ -65,10 +66,14 @@ def logout(page: Page) -> None:
 
 
 def discover_accounts(page: Page) -> list[dict]:
-    """Returns a list of {"name": str, "indice": str} for each account
-    found on the accounts overview page. There's no direct per-account
-    URL — each account is a clickable div on this same page, selected
-    by its stable data-indice attribute (see get_account_movements_html).
+    """Returns a list of {"name": str, "indice": str, "balance": str} for
+    each account found on the accounts overview page. There's no direct
+    per-account URL — each account is a clickable div on this same page,
+    selected by its stable data-indice attribute (see
+    get_account_movements_html). The balance is parsed from the same
+    aria-label used for the name (confirmed real format: "Acceso a Caja
+    Ahorro Pesos número ... saldo 0,00") — this page shows it directly,
+    no need to open the account to read it.
     """
     page.goto(ACCOUNTS_URL)
     page.wait_for_load_state("networkidle")
@@ -77,9 +82,11 @@ def discover_accounts(page: Page) -> list[dict]:
     accounts = []
     for el in soup.find_all("div", attrs={"role": "button", "data-indice": True, "data-tipo": True}):
         aria_label = el.get("aria-label", "")
-        match = re.search(r"Acceso a (.+?) número", aria_label)
-        name = match.group(1) if match else el["data-tipo"]
-        accounts.append({"name": name, "indice": el["data-indice"]})
+        name_match = re.search(r"Acceso a (.+?) número", aria_label)
+        name = name_match.group(1) if name_match else el["data-tipo"]
+        balance_match = re.search(r"saldo ([\d.,]+)", aria_label)
+        balance = balance_match.group(1) if balance_match else ""
+        accounts.append({"name": name, "indice": el["data-indice"], "balance": balance})
     return accounts
 
 
@@ -217,6 +224,20 @@ def sync_csv(filename: str, fieldnames: list[str], new_records: list[dict], pare
 
 def sync_account_movements_csv(account_name: str, new_movements: list[dict], parent_folder_id: str) -> None:
     sync_csv(f"{slugify(account_name)}.csv", ["date", "description", "amount"], new_movements, parent_folder_id)
+
+
+def sync_account_balance_csv(account_name: str, balance: str, parent_folder_id: str) -> None:
+    """Appends today's balance snapshot to saldo_<account>.csv — one row
+    per day, so re-running the same day is a no-op (sync_csv's row-tuple
+    dedup) but a balance change on a later day adds a new row instead of
+    overwriting history."""
+    today = date.today().isoformat()
+    sync_csv(
+        f"saldo_{slugify(account_name)}.csv",
+        ["date", "balance"],
+        [{"date": today, "balance": balance}],
+        parent_folder_id,
+    )
 
 
 CARDS_URL = "https://onlinebanking.bancogalicia.com.ar/navigation/menulink/390"
@@ -472,6 +493,7 @@ def main() -> int:
                         html = get_account_movements_html(page, account)
                         movements = parse_movements(html)
                         sync_account_movements_csv(account["name"], movements, CUENTAS_FOLDER_ID)
+                        sync_account_balance_csv(account["name"], account["balance"], CUENTAS_FOLDER_ID)
                     except Exception as e:
                         failures.append(f"cuenta {account['name']}: {e}")
             except Exception as e:
