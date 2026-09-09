@@ -90,6 +90,21 @@ def logout(page: Page) -> None:
 ACCOUNTS_URL = "https://digital.bna.com.ar/accounts/myaccounts"
 
 
+def navigate_to_accounts(page: Page) -> None:
+    """Open Cuentas through the authenticated SPA and wait for a final state."""
+    page.get_by_role("link", name="Cuentas", exact=True).click()
+    page.wait_for_function(
+        """() => {
+            const text = document.body?.innerText || '';
+            return !!document.querySelector('[id^="account_card_number_"]')
+                || text.includes('Mis Cuentas (0)')
+                || text.includes('ninguna cuenta abierta')
+                || location.pathname.includes('/error');
+        }""",
+        timeout=20000,
+    )
+
+
 class BNADataUnavailableError(RuntimeError):
     """BNA authenticated the session but did not provide usable account data."""
 
@@ -128,8 +143,7 @@ def discover_accounts(page: Page) -> list[dict]:
     (/accounts/<hash>) isn't visible until after clicking, so this
     returns the stable numeric index instead (see
     get_account_detail_html)."""
-    page.goto(ACCOUNTS_URL)
-    page.wait_for_load_state("networkidle")
+    navigate_to_accounts(page)
     return classify_accounts_html(page.content())
 
 
@@ -140,8 +154,7 @@ def get_account_detail_html(page: Page, account: dict) -> str:
     reliable for this SPA — confirmed via live testing that the table
     can still be empty right after networkidle fires) before returning
     the resulting page's HTML."""
-    page.goto(ACCOUNTS_URL)
-    page.wait_for_load_state("networkidle")
+    navigate_to_accounts(page)
     page.locator(f"#account_card_number_{account['index']}").click()
     page.wait_for_load_state("networkidle")
     try:
