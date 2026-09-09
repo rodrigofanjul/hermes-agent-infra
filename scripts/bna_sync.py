@@ -371,6 +371,94 @@ def sync_card_movements_csv(last4: str, movements: list[dict], parent_folder_id:
     )
 
 
+def list_card_statements(html: str) -> list[str]:
+    """Return statement labels only from list items with a download button."""
+    soup = BeautifulSoup(html, "html.parser")
+    labels = []
+    for item in soup.select("li"):
+        download_button = item.find(
+            "button",
+            string=lambda value: bool(value and value.strip() == "Descargar"),
+        )
+        label = item.find("p")
+        if download_button and label:
+            labels.append(label.get_text(strip=True))
+    return labels
+
+
+def download_statement_pdf(
+    page: Page,
+    card: dict,
+    index: int,
+    local_path: str,
+    attempts: int = 3,
+) -> bool:
+    """Download one statement with bounded retries and no raised failure."""
+    for attempt in range(attempts):
+        try:
+            with page.expect_download(timeout=15000) as download_info:
+                page.get_by_role(
+                    "button",
+                    name="Descargar",
+                    exact=True,
+                ).nth(index).click()
+            download_info.value.save_as(local_path)
+            return True
+        except Exception:
+            if attempt < attempts - 1:
+                open_card_detail(page, card)
+                try:
+                    page.get_by_text("Resúmenes", exact=True).click(timeout=5000)
+                    page.wait_for_load_state("networkidle")
+                except Exception:
+                    return False
+    return False
+
+
+def sync_card_statements(page: Page, card: dict, resumenes_folder_id: str) -> list[str]:
+    """Upload missing card statements and return labels that could not download."""
+    open_card_detail(page, card)
+    try:
+        page.get_by_text("Resúmenes", exact=True).click(timeout=5000)
+    except Exception:
+        return []
+    page.wait_for_load_state("networkidle")
+    labels = list_card_statements(page.content())
+
+    failed = []
+    for index, label in enumerate(labels):
+        filename = f"{card['last4']}_{slugify(label)}.pdf"
+        if drive_find_file(filename, resumenes_folder_id):
+            continue
+
+        local_path = f"/tmp/{filename}"
+        if not download_statement_pdf(page, card, index, local_path):
+            failed.append(label)
+            continue
+
+        try:
+            subprocess.run(
+                [
+                    VENV_PYTHON,
+                    GOOGLE_API_SCRIPT,
+                    "drive",
+                    "upload",
+                    local_path,
+                    "--name",
+                    filename,
+                    "--parent",
+                    resumenes_folder_id,
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+        finally:
+            if os.path.exists(local_path):
+                os.remove(local_path)
+    return failed
+
+
 def main() -> int:
     with sync_playwright() as p:
         browser = p.chromium.launch(args=["--no-sandbox"])
@@ -415,6 +503,20 @@ def main() -> int:
                             )
                     except Exception as e:
                         failures.append(f"movimientos tarjeta {card['last4']}: {e}")
+
+                    try:
+                        failed_statements = sync_card_statements(
+                            page,
+                            card,
+                            RESUMENES_FOLDER_ID,
+                        )
+                        if failed_statements:
+                            failures.append(
+                                f"resúmenes tarjeta {card['last4']}: "
+                                + ", ".join(failed_statements)
+                            )
+                    except Exception as e:
+                        failures.append(f"resúmenes tarjeta {card['last4']}: {e}")
             except Exception as e:
                 failures.append(f"descubrimiento de tarjetas: {e}")
 

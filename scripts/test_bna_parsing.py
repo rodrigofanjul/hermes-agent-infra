@@ -2,23 +2,26 @@
 """Fast, repeatable tests for bna_sync.py's HTML parsing functions, run
 against fixture files (no live login needed)."""
 import os
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 from bna_diagnose_accounts import sanitized_path
 from bna_sync import (
     BNADataUnavailableError,
     classify_accounts_html,
     discover_cards_from_html,
+    download_statement_pdf,
     discover_accounts_from_html,
     get_card_movements_html,
     get_account_detail_html,
     navigate_to_cards,
     navigate_to_accounts,
     open_card_detail,
+    list_card_statements,
     parse_account_balance,
     parse_bank_table,
     validate_account_detail,
     sync_card_movements_csv,
+    sync_card_statements,
 )
 
 FIXTURES_DIR = os.path.join(os.path.dirname(__file__), "fixtures")
@@ -194,6 +197,107 @@ def test_sync_card_movements_csv_uses_last_four_digits():
     )
 
 
+def test_list_card_statements_ignores_unrelated_lists():
+    labels = list_card_statements(_read("bna_card_statements_sample.html"))
+    assert labels == ["Agosto 2026", "Julio 2026"]
+
+
+def test_download_statement_pdf_saves_successful_download():
+    page = MagicMock()
+    download_info = MagicMock()
+    page.expect_download.return_value.__enter__.return_value = download_info
+
+    result = download_statement_pdf(
+        page,
+        {"index": "0", "last4": "1234"},
+        1,
+        "/tmp/statement.pdf",
+        attempts=1,
+    )
+
+    assert result is True
+    page.get_by_role.assert_called_once_with("button", name="Descargar", exact=True)
+    page.get_by_role.return_value.nth.assert_called_once_with(1)
+    download_info.value.save_as.assert_called_once_with("/tmp/statement.pdf")
+
+
+def test_download_statement_pdf_retries_are_bounded():
+    page = Mock()
+    page.expect_download.side_effect = RuntimeError("download failed")
+    card = {"index": "0", "last4": "1234"}
+
+    with patch("bna_sync.open_card_detail") as mocked_open:
+        result = download_statement_pdf(page, card, 0, "/tmp/statement.pdf", attempts=3)
+
+    assert result is False
+    assert mocked_open.call_count == 2
+
+
+def test_sync_card_statements_accepts_card_without_summaries_tab():
+    page = Mock()
+    page.get_by_text.return_value.click.side_effect = RuntimeError("tab absent")
+    with patch("bna_sync.open_card_detail"):
+        result = sync_card_statements(page, {"index": "1", "last4": "5678"}, "folder-id")
+
+    assert result == []
+
+
+def test_sync_card_statements_skips_files_already_in_drive():
+    page = Mock()
+    page.content.return_value = _read("bna_card_statements_sample.html")
+    card = {"index": "0", "last4": "1234"}
+    with (
+        patch("bna_sync.open_card_detail"),
+        patch("bna_sync.drive_find_file", return_value="existing-id") as mocked_find,
+        patch("bna_sync.download_statement_pdf") as mocked_download,
+    ):
+        result = sync_card_statements(page, card, "folder-id")
+
+    assert result == []
+    assert [call.args[0] for call in mocked_find.call_args_list] == [
+        "1234_agosto_2026.pdf",
+        "1234_julio_2026.pdf",
+    ]
+    mocked_download.assert_not_called()
+
+
+def test_sync_card_statements_uploads_new_pdf():
+    page = Mock()
+    page.content.return_value = "<ul><li><p>Agosto 2026</p><button>Descargar</button></li></ul>"
+    card = {"index": "0", "last4": "1234"}
+    with (
+        patch("bna_sync.open_card_detail"),
+        patch("bna_sync.drive_find_file", return_value=None),
+        patch("bna_sync.download_statement_pdf", return_value=True),
+        patch("bna_sync.subprocess.run") as mocked_run,
+        patch("bna_sync.os.path.exists", return_value=True),
+        patch("bna_sync.os.remove") as mocked_remove,
+    ):
+        result = sync_card_statements(page, card, "folder-id")
+
+    assert result == []
+    assert mocked_run.call_args.args[0][-4:] == [
+        "--name", "1234_agosto_2026.pdf", "--parent", "folder-id"
+    ]
+    mocked_remove.assert_called_once_with("/tmp/1234_agosto_2026.pdf")
+
+
+def test_sync_card_statements_reports_failed_month():
+    page = Mock()
+    page.content.return_value = "<ul><li><p>Agosto 2026</p><button>Descargar</button></li></ul>"
+    card = {"index": "0", "last4": "1234"}
+    with (
+        patch("bna_sync.open_card_detail"),
+        patch("bna_sync.drive_find_file", return_value=None),
+        patch("bna_sync.download_statement_pdf", return_value=False),
+        patch("bna_sync.subprocess.run") as mocked_run,
+    ):
+        result = sync_card_statements(page, card, "folder-id")
+
+    assert result == ["Agosto 2026"]
+    mocked_run.assert_not_called()
+
+
 if __name__ == "__main__":
     test_discover_accounts_from_fixture()
     test_parse_account_movements_from_fixture()
@@ -213,3 +317,10 @@ if __name__ == "__main__":
     test_open_card_detail_never_hard_navigates()
     test_get_card_movements_html_returns_rendered_page()
     test_sync_card_movements_csv_uses_last_four_digits()
+    test_list_card_statements_ignores_unrelated_lists()
+    test_download_statement_pdf_saves_successful_download()
+    test_download_statement_pdf_retries_are_bounded()
+    test_sync_card_statements_accepts_card_without_summaries_tab()
+    test_sync_card_statements_skips_files_already_in_drive()
+    test_sync_card_statements_uploads_new_pdf()
+    test_sync_card_statements_reports_failed_month()
