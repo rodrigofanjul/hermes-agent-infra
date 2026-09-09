@@ -43,6 +43,15 @@ def login(page: Page) -> bool:
     page.locator("#password").type(password, delay=30)
     page.locator("#global\\.continue").click()
     page.wait_for_load_state("networkidle")
+    try:
+        # Confirmed via live testing: networkidle fires before the SPA's
+        # client-side navigation away from /loginStep2 actually completes
+        # (about 1s later) — checking page.url right after networkidle
+        # alone caught a false "still on loginStep2" a real successful
+        # login as a failure.
+        page.wait_for_function("() => !location.pathname.includes('loginStep')", timeout=15000)
+    except Exception:
+        pass  # genuinely still on a login step — return False below
 
     return "loginStep" not in page.url
 
