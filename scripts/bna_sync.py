@@ -459,6 +459,69 @@ def sync_card_statements(page: Page, card: dict, resumenes_folder_id: str) -> li
     return failed
 
 
+def navigate_to_loans(page: Page) -> None:
+    """Open Préstamos through the authenticated SPA and wait for its list."""
+    page.get_by_role("link", name="Préstamos", exact=True).click()
+    page.wait_for_function(
+        r"""() => {
+            const links = [...document.querySelectorAll('a[href^="/loans/"]')];
+            return links.some(link => /Préstamo\s*-/.test(link.innerText))
+                || location.pathname.includes('/error');
+        }""",
+        timeout=20000,
+    )
+
+
+def discover_loans_from_html(html: str) -> list[dict]:
+    """Parse real loan detail links and their displayed loan numbers."""
+    soup = BeautifulSoup(html, "html.parser")
+    loans = []
+    for link in soup.find_all("a", href=re.compile(r"^/loans/[0-9a-f]+$")):
+        match = re.search(r"Préstamo\s*-\s*(\d+)", link.get_text(" ", strip=True))
+        if match:
+            loans.append({"url": link["href"], "number": match.group(1)})
+    return loans
+
+
+def discover_loans(page: Page) -> list[dict]:
+    navigate_to_loans(page)
+    loans = discover_loans_from_html(page.content())
+    if not loans:
+        raise BNADataUnavailableError("BNA no proporcionó préstamos")
+    return loans
+
+
+def get_loan_installments_html(page: Page, loan: dict) -> str:
+    """Open a loan through the SPA and render its complete installment history."""
+    navigate_to_loans(page)
+    page.locator(f'a[href="{loan["url"]}"]').click()
+    page.wait_for_function(
+        """() => {
+            const text = document.body?.innerText || '';
+            return text.includes('Todas las cuotas')
+                || location.pathname.includes('/error');
+        }""",
+        timeout=20000,
+    )
+    page.get_by_role("radio", name="Todas las cuotas").click()
+    page.wait_for_load_state("networkidle")
+    page.wait_for_selector("table tbody", timeout=15000)
+    return page.content()
+
+
+def sync_loan_installments_csv(
+    loan_number: str,
+    installments: list[dict],
+    parent_folder_id: str,
+) -> None:
+    sync_csv(
+        f"prestamo_{loan_number}.csv",
+        ["installment", "due_date", "status", "amount"],
+        installments,
+        parent_folder_id,
+    )
+
+
 def main() -> int:
     with sync_playwright() as p:
         browser = p.chromium.launch(args=["--no-sandbox"])
@@ -519,6 +582,29 @@ def main() -> int:
                         failures.append(f"resúmenes tarjeta {card['last4']}: {e}")
             except Exception as e:
                 failures.append(f"descubrimiento de tarjetas: {e}")
+
+            try:
+                loans = discover_loans(page)
+                for loan in loans:
+                    try:
+                        installments_html = get_loan_installments_html(page, loan)
+                        installments = parse_bank_table(
+                            installments_html,
+                            ["installment", "due_date", "status", "amount"],
+                        )
+                        if not installments:
+                            raise BNADataUnavailableError(
+                                "BNA no proporcionó cuotas del préstamo"
+                            )
+                        sync_loan_installments_csv(
+                            loan["number"],
+                            installments,
+                            PRESTAMOS_FOLDER_ID,
+                        )
+                    except Exception as e:
+                        failures.append(f"préstamo {loan['number']}: {e}")
+            except Exception as e:
+                failures.append(f"descubrimiento de préstamos: {e}")
 
             if failures:
                 print("BNA: sync parcial, falló: " + "; ".join(failures))

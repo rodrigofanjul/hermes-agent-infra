@@ -9,11 +9,14 @@ from bna_sync import (
     BNADataUnavailableError,
     classify_accounts_html,
     discover_cards_from_html,
+    discover_loans_from_html,
     download_statement_pdf,
     discover_accounts_from_html,
     get_card_movements_html,
+    get_loan_installments_html,
     get_account_detail_html,
     navigate_to_cards,
+    navigate_to_loans,
     navigate_to_accounts,
     open_card_detail,
     list_card_statements,
@@ -22,6 +25,7 @@ from bna_sync import (
     validate_account_detail,
     sync_card_movements_csv,
     sync_card_statements,
+    sync_loan_installments_csv,
 )
 
 FIXTURES_DIR = os.path.join(os.path.dirname(__file__), "fixtures")
@@ -298,6 +302,75 @@ def test_sync_card_statements_reports_failed_month():
     mocked_run.assert_not_called()
 
 
+def test_discover_loans_from_real_shaped_links():
+    html = (
+        '<a href="/loans/abc123">Préstamo - 0014682194</a>'
+        '<a href="/loans/list">Préstamos</a>'
+    )
+    loans = discover_loans_from_html(html)
+    assert loans == [{"url": "/loans/abc123", "number": "0014682194"}]
+
+
+def test_parse_loan_installments_from_fixture():
+    installments = parse_bank_table(
+        _read("bna_loan_installments_sample.html"),
+        ["installment", "due_date", "status", "amount"],
+    )
+    assert installments == [
+        {
+            "installment": "1",
+            "due_date": "10/02/2022",
+            "status": "Paga",
+            "amount": "$ 50.000,00",
+        },
+        {
+            "installment": "56",
+            "due_date": "10/09/2026",
+            "status": "A vencer",
+            "amount": "$ 630.000,00",
+        },
+    ]
+
+
+def test_navigate_to_loans_uses_internal_link():
+    page = Mock()
+
+    navigate_to_loans(page)
+
+    page.get_by_role.assert_called_once_with("link", name="Préstamos", exact=True)
+    page.get_by_role.return_value.click.assert_called_once_with()
+    page.goto.assert_not_called()
+
+
+def test_get_loan_installments_uses_spa_link_and_all_filter():
+    page = Mock()
+    page.content.return_value = "<html><table><tbody></tbody></table></html>"
+    loan = {"url": "/loans/abc123", "number": "0014682194"}
+    with patch("bna_sync.navigate_to_loans") as mocked_navigate:
+        html = get_loan_installments_html(page, loan)
+
+    mocked_navigate.assert_called_once_with(page)
+    page.locator.assert_called_once_with('a[href="/loans/abc123"]')
+    page.get_by_role.assert_called_once_with("radio", name="Todas las cuotas")
+    page.goto.assert_not_called()
+    assert html == page.content.return_value
+
+
+def test_sync_loan_installments_csv_uses_loan_number():
+    installments = [
+        {"installment": "1", "due_date": "10/02/2022", "status": "Paga", "amount": "$ 1,00"}
+    ]
+    with patch("bna_sync.sync_csv") as mocked_sync:
+        sync_loan_installments_csv("0014682194", installments, "folder-id")
+
+    mocked_sync.assert_called_once_with(
+        "prestamo_0014682194.csv",
+        ["installment", "due_date", "status", "amount"],
+        installments,
+        "folder-id",
+    )
+
+
 if __name__ == "__main__":
     test_discover_accounts_from_fixture()
     test_parse_account_movements_from_fixture()
@@ -324,3 +397,8 @@ if __name__ == "__main__":
     test_sync_card_statements_skips_files_already_in_drive()
     test_sync_card_statements_uploads_new_pdf()
     test_sync_card_statements_reports_failed_month()
+    test_discover_loans_from_real_shaped_links()
+    test_parse_loan_installments_from_fixture()
+    test_navigate_to_loans_uses_internal_link()
+    test_get_loan_installments_uses_spa_link_and_all_filter()
+    test_sync_loan_installments_csv_uses_loan_number()
