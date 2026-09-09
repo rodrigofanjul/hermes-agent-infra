@@ -527,6 +527,88 @@ def sync_loan_installments_csv(
     )
 
 
+def sync_authenticated(page: Page) -> list[str]:
+    """Sync authenticated sections, leaving fragile PDF downloads until last."""
+    failures = []
+
+    try:
+        accounts = discover_accounts(page)
+        for account in accounts:
+            try:
+                html = get_account_detail_html(page, account)
+                movements = parse_bank_table(html, ["date", "receipt", "description", "amount"])
+                balance = parse_account_balance(html)
+                validate_account_detail(html, balance)
+                if movements:
+                    sync_account_movements_csv(account["name"], movements, CUENTAS_FOLDER_ID)
+                sync_account_balance_csv(account["name"], balance, CUENTAS_FOLDER_ID)
+            except Exception as e:
+                failures.append(f"cuenta {account['name']}: {e}")
+    except Exception as e:
+        failures.append(f"descubrimiento de cuentas: {e}")
+
+    cards = []
+    try:
+        cards = discover_cards(page)
+        for card in cards:
+            try:
+                movements_html = get_card_movements_html(page, card)
+                movements = parse_bank_table(
+                    movements_html,
+                    ["description", "date", "amount"],
+                )
+                if movements:
+                    sync_card_movements_csv(
+                        card["last4"],
+                        movements,
+                        TARJETAS_FOLDER_ID,
+                    )
+            except Exception as e:
+                failures.append(f"movimientos tarjeta {card['last4']}: {e}")
+    except Exception as e:
+        failures.append(f"descubrimiento de tarjetas: {e}")
+
+    try:
+        loans = discover_loans(page)
+        for loan in loans:
+            try:
+                installments_html = get_loan_installments_html(page, loan)
+                installments = parse_bank_table(
+                    installments_html,
+                    ["installment", "due_date", "status", "amount"],
+                )
+                if not installments:
+                    raise BNADataUnavailableError(
+                        "BNA no proporcionó cuotas del préstamo"
+                    )
+                sync_loan_installments_csv(
+                    loan["number"],
+                    installments,
+                    PRESTAMOS_FOLDER_ID,
+                )
+            except Exception as e:
+                failures.append(f"préstamo {loan['number']}: {e}")
+    except Exception as e:
+        failures.append(f"descubrimiento de préstamos: {e}")
+
+    for card in cards:
+        try:
+            failed_statements = sync_card_statements(
+                page,
+                card,
+                RESUMENES_FOLDER_ID,
+            )
+            if failed_statements:
+                failures.append(
+                    f"resúmenes tarjeta {card['last4']}: "
+                    + ", ".join(failed_statements)
+                )
+        except Exception as e:
+            failures.append(f"resúmenes tarjeta {card['last4']}: {e}")
+
+    return failures
+
+
 def main() -> int:
     with sync_playwright() as p:
         browser = p.chromium.launch(args=["--no-sandbox"])
@@ -536,85 +618,10 @@ def main() -> int:
                 print("BNA: no se pudo iniciar sesión, revisar manualmente")
                 return 1
 
-            failures = []
-
-            try:
-                accounts = discover_accounts(page)
-                for account in accounts:
-                    try:
-                        html = get_account_detail_html(page, account)
-                        movements = parse_bank_table(html, ["date", "receipt", "description", "amount"])
-                        balance = parse_account_balance(html)
-                        validate_account_detail(html, balance)
-                        if movements:
-                            sync_account_movements_csv(account["name"], movements, CUENTAS_FOLDER_ID)
-                        sync_account_balance_csv(account["name"], balance, CUENTAS_FOLDER_ID)
-                    except Exception as e:
-                        failures.append(f"cuenta {account['name']}: {e}")
-            except Exception as e:
-                failures.append(f"descubrimiento de cuentas: {e}")
-
-            try:
-                cards = discover_cards(page)
-                for card in cards:
-                    try:
-                        movements_html = get_card_movements_html(page, card)
-                        movements = parse_bank_table(
-                            movements_html,
-                            ["description", "date", "amount"],
-                        )
-                        if movements:
-                            sync_card_movements_csv(
-                                card["last4"],
-                                movements,
-                                TARJETAS_FOLDER_ID,
-                            )
-                    except Exception as e:
-                        failures.append(f"movimientos tarjeta {card['last4']}: {e}")
-
-                    try:
-                        failed_statements = sync_card_statements(
-                            page,
-                            card,
-                            RESUMENES_FOLDER_ID,
-                        )
-                        if failed_statements:
-                            failures.append(
-                                f"resúmenes tarjeta {card['last4']}: "
-                                + ", ".join(failed_statements)
-                            )
-                    except Exception as e:
-                        failures.append(f"resúmenes tarjeta {card['last4']}: {e}")
-            except Exception as e:
-                failures.append(f"descubrimiento de tarjetas: {e}")
-
-            try:
-                loans = discover_loans(page)
-                for loan in loans:
-                    try:
-                        installments_html = get_loan_installments_html(page, loan)
-                        installments = parse_bank_table(
-                            installments_html,
-                            ["installment", "due_date", "status", "amount"],
-                        )
-                        if not installments:
-                            raise BNADataUnavailableError(
-                                "BNA no proporcionó cuotas del préstamo"
-                            )
-                        sync_loan_installments_csv(
-                            loan["number"],
-                            installments,
-                            PRESTAMOS_FOLDER_ID,
-                        )
-                    except Exception as e:
-                        failures.append(f"préstamo {loan['number']}: {e}")
-            except Exception as e:
-                failures.append(f"descubrimiento de préstamos: {e}")
-
+            failures = sync_authenticated(page)
             if failures:
                 print("BNA: sync parcial, falló: " + "; ".join(failures))
                 return 1
-
             return 0
         finally:
             logout(page)

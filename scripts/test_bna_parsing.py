@@ -25,6 +25,7 @@ from bna_sync import (
     validate_account_detail,
     sync_card_movements_csv,
     sync_card_statements,
+    sync_authenticated,
     sync_csv,
     sync_loan_installments_csv,
 )
@@ -422,6 +423,37 @@ def test_sync_csv_uploads_replacement_before_deleting_existing_file():
     assert operations == ["download", "upload", "delete"]
 
 
+def test_authenticated_sync_runs_fragile_statements_after_loans():
+    page = Mock()
+    card = {"index": "0", "kind": "credit", "last4": "1234"}
+    loan = {"url": "/loans/abc123", "number": "0014682194"}
+    events = []
+
+    def record_loan(*args):
+        events.append("loans")
+
+    def record_statements(*args):
+        events.append("statements")
+        return []
+
+    with (
+        patch("bna_sync.discover_accounts", return_value=[]),
+        patch("bna_sync.discover_cards", return_value=[card]),
+        patch("bna_sync.get_card_movements_html", return_value=""),
+        patch("bna_sync.discover_loans", return_value=[loan]),
+        patch(
+            "bna_sync.get_loan_installments_html",
+            return_value=_read("bna_loan_installments_sample.html"),
+        ),
+        patch("bna_sync.sync_loan_installments_csv", side_effect=record_loan),
+        patch("bna_sync.sync_card_statements", side_effect=record_statements),
+    ):
+        failures = sync_authenticated(page)
+
+    assert failures == []
+    assert events == ["loans", "statements"]
+
+
 if __name__ == "__main__":
     test_discover_accounts_from_fixture()
     test_parse_account_movements_from_fixture()
@@ -456,3 +488,4 @@ if __name__ == "__main__":
     test_get_loan_installments_uses_spa_link_and_all_filter()
     test_sync_loan_installments_csv_uses_loan_number()
     test_sync_csv_uploads_replacement_before_deleting_existing_file()
+    test_authenticated_sync_runs_fragile_statements_after_loans()
