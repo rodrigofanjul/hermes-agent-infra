@@ -21,6 +21,7 @@ from bna_sync import (
     navigate_to_accounts,
     open_card_detail,
     list_card_statements,
+    statements_page_is_empty,
     parse_account_balance,
     parse_bank_table,
     validate_account_detail,
@@ -183,6 +184,9 @@ def test_open_card_detail_never_hard_navigates():
 
     page.goto.assert_not_called()
     page.locator.assert_called_once_with("#card-0")
+    detail_pattern = page.wait_for_url.call_args.args[0]
+    assert detail_pattern.search("/cards/creditCards/detail/opaque-id")
+    assert detail_pattern.search("/cards/debitCards/detail/opaque-id")
 
 
 def test_get_card_movements_html_returns_rendered_page():
@@ -221,6 +225,13 @@ def test_sync_card_movements_csv_uses_last_four_digits():
 def test_list_card_statements_ignores_unrelated_lists():
     labels = list_card_statements(_read("bna_card_statements_sample.html"))
     assert labels == ["Agosto 2026", "Julio 2026"]
+
+
+def test_statements_page_recognizes_known_empty_state():
+    assert statements_page_is_empty(
+        "<html><body>Todavía no tenés resúmenes</body></html>"
+    )
+    assert not statements_page_is_empty(_read("bna_card_statements_sample.html"))
 
 
 def test_download_statement_pdf_saves_successful_download():
@@ -273,6 +284,19 @@ def test_sync_card_statements_rejects_loaded_tab_without_statement_rows():
             assert "lista de resúmenes" in str(exc)
         else:
             raise AssertionError("a loaded summaries tab without rows must fail")
+
+
+def test_sync_card_statements_accepts_explicit_empty_state():
+    page = Mock()
+    page.content.return_value = "<html><body>Todavía no tenés resúmenes</body></html>"
+    with patch("bna_sync.open_card_detail"):
+        result = sync_card_statements(
+            page,
+            {"index": "0", "last4": "1234"},
+            "folder-id",
+        )
+
+    assert result == []
 
 
 def test_sync_card_statements_skips_files_already_in_drive():
@@ -541,10 +565,12 @@ if __name__ == "__main__":
     test_get_card_movements_html_accepts_card_without_rows()
     test_sync_card_movements_csv_uses_last_four_digits()
     test_list_card_statements_ignores_unrelated_lists()
+    test_statements_page_recognizes_known_empty_state()
     test_download_statement_pdf_saves_successful_download()
     test_download_statement_pdf_retries_are_bounded()
     test_sync_card_statements_accepts_card_without_summaries_tab()
     test_sync_card_statements_rejects_loaded_tab_without_statement_rows()
+    test_sync_card_statements_accepts_explicit_empty_state()
     test_sync_card_statements_skips_files_already_in_drive()
     test_sync_card_statements_uploads_new_pdf()
     test_sync_card_statements_reports_failed_month()

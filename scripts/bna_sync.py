@@ -336,16 +336,14 @@ def open_card_detail(page: Page, card: dict) -> None:
     """Open a card detail through the authenticated SPA."""
     navigate_to_cards(page)
     page.locator(f"#card-{card['index']}").click()
-    page.wait_for_function(
-        """() => {
-            const text = document.body?.innerText || '';
-            return text.includes('Movimientos')
-                || text.includes('Detalles')
-                || text.includes('Resúmenes')
-                || location.pathname.includes('/error');
-        }""",
+    page.wait_for_url(
+        re.compile(r"/cards/(?:creditCards|debitCards)/detail/"),
         timeout=20000,
     )
+    try:
+        page.wait_for_load_state("networkidle", timeout=15000)
+    except Exception:
+        pass
 
 
 def get_card_movements_html(page: Page, card: dict) -> str:
@@ -387,6 +385,18 @@ def list_card_statements(html: str) -> list[str]:
     return labels
 
 
+def statements_page_is_empty(html: str) -> bool:
+    text = BeautifulSoup(html, "html.parser").get_text(" ", strip=True).casefold()
+    return any(
+        phrase in text
+        for phrase in (
+            "no tenés resúmenes",
+            "no hay resúmenes",
+            "todavía no tenés resúmenes",
+        )
+    )
+
+
 def download_statement_pdf(
     page: Page,
     card: dict,
@@ -424,7 +434,23 @@ def sync_card_statements(page: Page, card: dict, resumenes_folder_id: str) -> li
     except Exception:
         return []
     page.wait_for_load_state("networkidle")
-    labels = list_card_statements(page.content())
+    page.wait_for_function(
+        """() => {
+            const text = (document.body?.innerText || '').toLocaleLowerCase('es');
+            const hasDownload = [...document.querySelectorAll('button')]
+                .some(button => button.innerText.trim() === 'Descargar');
+            return hasDownload
+                || text.includes('no tenés resúmenes')
+                || text.includes('no hay resúmenes')
+                || text.includes('todavía no tenés resúmenes')
+                || location.pathname.includes('/error');
+        }""",
+        timeout=30000,
+    )
+    statements_html = page.content()
+    labels = list_card_statements(statements_html)
+    if not labels and statements_page_is_empty(statements_html):
+        return []
     if not labels:
         raise BNADataUnavailableError("BNA no proporcionó la lista de resúmenes")
 
