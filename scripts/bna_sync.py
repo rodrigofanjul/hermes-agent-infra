@@ -292,6 +292,85 @@ def sync_account_balance_csv(account_name: str, balance: str, parent_folder_id: 
     )
 
 
+def navigate_to_cards(page: Page) -> None:
+    """Open Tarjetas through the authenticated SPA and wait for a final state."""
+    page.get_by_role("link", name="Tarjetas", exact=True).click()
+    page.wait_for_function(
+        """() => {
+            const text = document.body?.innerText || '';
+            return !!document.querySelector('[id^="card-"]')
+                || text.includes('ninguna tarjeta')
+                || location.pathname.includes('/error');
+        }""",
+        timeout=20000,
+    )
+
+
+def discover_cards_from_html(html: str) -> list[dict]:
+    """Parse the stable card buttons rendered on the cards overview."""
+    soup = BeautifulSoup(html, "html.parser")
+    cards = []
+    for button in soup.find_all("button", id=re.compile(r"^card-\d+$")):
+        index = button["id"].split("-")[1]
+        card_text = button.get_text(" ", strip=True)
+        last4_match = re.search(r"(\d{4})\s*$", card_text)
+        kind = "credit" if card_text.casefold().startswith("crédito") else "debit"
+        cards.append({
+            "index": index,
+            "kind": kind,
+            "last4": last4_match.group(1) if last4_match else "",
+        })
+    return cards
+
+
+def discover_cards(page: Page) -> list[dict]:
+    navigate_to_cards(page)
+    cards = discover_cards_from_html(page.content())
+    if not cards:
+        raise BNADataUnavailableError("BNA no proporcionó tarjetas")
+    return cards
+
+
+def open_card_detail(page: Page, card: dict) -> None:
+    """Open a card detail through the authenticated SPA."""
+    navigate_to_cards(page)
+    page.locator(f"#card-{card['index']}").click()
+    page.wait_for_function(
+        """() => {
+            const text = document.body?.innerText || '';
+            return text.includes('Movimientos')
+                || text.includes('Detalles')
+                || text.includes('Resúmenes')
+                || location.pathname.includes('/error');
+        }""",
+        timeout=20000,
+    )
+
+
+def get_card_movements_html(page: Page, card: dict) -> str:
+    """Return a card's rendered current-period movements page."""
+    open_card_detail(page, card)
+    try:
+        page.get_by_text("Movimientos", exact=True).click(timeout=5000)
+    except Exception:
+        return ""
+    page.wait_for_load_state("networkidle")
+    try:
+        page.wait_for_selector("table tbody", timeout=15000)
+    except Exception:
+        pass
+    return page.content()
+
+
+def sync_card_movements_csv(last4: str, movements: list[dict], parent_folder_id: str) -> None:
+    sync_csv(
+        f"tarjeta_{last4}.csv",
+        ["description", "date", "amount"],
+        movements,
+        parent_folder_id,
+    )
+
+
 def main() -> int:
     with sync_playwright() as p:
         browser = p.chromium.launch(args=["--no-sandbox"])
@@ -318,6 +397,26 @@ def main() -> int:
                         failures.append(f"cuenta {account['name']}: {e}")
             except Exception as e:
                 failures.append(f"descubrimiento de cuentas: {e}")
+
+            try:
+                cards = discover_cards(page)
+                for card in cards:
+                    try:
+                        movements_html = get_card_movements_html(page, card)
+                        movements = parse_bank_table(
+                            movements_html,
+                            ["description", "date", "amount"],
+                        )
+                        if movements:
+                            sync_card_movements_csv(
+                                card["last4"],
+                                movements,
+                                TARJETAS_FOLDER_ID,
+                            )
+                    except Exception as e:
+                        failures.append(f"movimientos tarjeta {card['last4']}: {e}")
+            except Exception as e:
+                failures.append(f"descubrimiento de tarjetas: {e}")
 
             if failures:
                 print("BNA: sync parcial, falló: " + "; ".join(failures))

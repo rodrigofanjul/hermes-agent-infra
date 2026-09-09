@@ -2,18 +2,23 @@
 """Fast, repeatable tests for bna_sync.py's HTML parsing functions, run
 against fixture files (no live login needed)."""
 import os
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from bna_diagnose_accounts import sanitized_path
 from bna_sync import (
     BNADataUnavailableError,
     classify_accounts_html,
+    discover_cards_from_html,
     discover_accounts_from_html,
+    get_card_movements_html,
     get_account_detail_html,
+    navigate_to_cards,
     navigate_to_accounts,
+    open_card_detail,
     parse_account_balance,
     parse_bank_table,
     validate_account_detail,
+    sync_card_movements_csv,
 )
 
 FIXTURES_DIR = os.path.join(os.path.dirname(__file__), "fixtures")
@@ -126,6 +131,69 @@ def test_sanitized_path_removes_queries_and_long_identifiers():
     assert sanitized_path(url) == "/api/v1/accounts/<id>"
 
 
+def test_discover_cards_from_fixture():
+    cards = discover_cards_from_html(_read("bna_cards_sample.html"))
+    assert cards == [
+        {"index": "0", "kind": "credit", "last4": "1234"},
+        {"index": "1", "kind": "debit", "last4": "5678"},
+    ]
+
+
+def test_parse_card_movements_from_fixture():
+    movements = parse_bank_table(
+        _read("bna_card_movements_sample.html"),
+        ["description", "date", "amount"],
+    )
+    assert movements == [
+        {"description": "SU PAGO", "date": "02/09/2026", "amount": "- $ 1.000,00"},
+        {"description": "ALMACEN DON JOSE", "date": "15/08/2026", "amount": "$ 500,00"},
+    ]
+
+
+def test_navigate_to_cards_uses_internal_link_and_semantic_wait():
+    page = Mock()
+
+    navigate_to_cards(page)
+
+    page.get_by_role.assert_called_once_with("link", name="Tarjetas", exact=True)
+    page.get_by_role.return_value.click.assert_called_once_with()
+    expression = page.wait_for_function.call_args.args[0]
+    assert "card-" in expression
+
+
+def test_open_card_detail_never_hard_navigates():
+    page = Mock()
+
+    open_card_detail(page, {"index": "0"})
+
+    page.goto.assert_not_called()
+    page.locator.assert_called_once_with("#card-0")
+
+
+def test_get_card_movements_html_returns_rendered_page():
+    page = Mock()
+    page.content.return_value = "<html><table><tbody></tbody></table></html>"
+    with patch("bna_sync.open_card_detail") as mocked_open:
+        html = get_card_movements_html(page, {"index": "0"})
+
+    mocked_open.assert_called_once_with(page, {"index": "0"})
+    page.get_by_text.assert_called_once_with("Movimientos", exact=True)
+    assert html == page.content.return_value
+
+
+def test_sync_card_movements_csv_uses_last_four_digits():
+    movements = [{"description": "COMPRA", "date": "01/09/2026", "amount": "$ 1,00"}]
+    with patch("bna_sync.sync_csv") as mocked_sync:
+        sync_card_movements_csv("1234", movements, "folder-id")
+
+    mocked_sync.assert_called_once_with(
+        "tarjeta_1234.csv",
+        ["description", "date", "amount"],
+        movements,
+        "folder-id",
+    )
+
+
 if __name__ == "__main__":
     test_discover_accounts_from_fixture()
     test_parse_account_movements_from_fixture()
@@ -139,3 +207,9 @@ if __name__ == "__main__":
     test_navigate_to_accounts_uses_internal_link_and_semantic_wait()
     test_get_account_detail_navigates_back_through_spa()
     test_sanitized_path_removes_queries_and_long_identifiers()
+    test_discover_cards_from_fixture()
+    test_parse_card_movements_from_fixture()
+    test_navigate_to_cards_uses_internal_link_and_semantic_wait()
+    test_open_card_detail_never_hard_navigates()
+    test_get_card_movements_html_returns_rendered_page()
+    test_sync_card_movements_csv_uses_last_four_digits()
