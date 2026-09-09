@@ -358,10 +358,8 @@ def get_card_movements_html(page: Page, card: dict) -> str:
     page.wait_for_load_state("networkidle")
     try:
         page.wait_for_selector("table tbody", timeout=15000)
-    except Exception as exc:
-        raise BNADataUnavailableError(
-            "BNA no proporcionó la tabla de movimientos de la tarjeta"
-        ) from exc
+    except Exception:
+        return ""
     return page.content()
 
 

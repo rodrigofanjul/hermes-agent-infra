@@ -54,6 +54,7 @@ def has_known_empty_state(page, section: str) -> bool:
 
 def inspect_cards(page) -> None:
     click_section(page, "Tarjetas")
+    page.wait_for_selector('[id^="card-"]', timeout=30000)
     cards = discover_cards_from_html(page.content())
     credit = sum(card["kind"] == "credit" for card in cards)
     debit = sum(card["kind"] == "debit" for card in cards)

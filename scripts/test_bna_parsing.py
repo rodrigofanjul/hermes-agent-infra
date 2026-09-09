@@ -5,6 +5,7 @@ import os
 from unittest.mock import MagicMock, Mock, mock_open, patch
 
 from bna_diagnose_accounts import sanitized_path
+from bna_diagnose_sections import inspect_cards
 from bna_sync import (
     BNADataUnavailableError,
     classify_accounts_html,
@@ -190,16 +191,13 @@ def test_get_card_movements_html_returns_rendered_page():
     assert html == page.content.return_value
 
 
-def test_get_card_movements_html_rejects_missing_table_after_tab_opens():
+def test_get_card_movements_html_accepts_card_without_rows():
     page = Mock()
     page.wait_for_selector.side_effect = RuntimeError("table timeout")
     with patch("bna_sync.open_card_detail"):
-        try:
-            get_card_movements_html(page, {"index": "0"})
-        except BNADataUnavailableError as exc:
-            assert "tabla de movimientos" in str(exc)
-        else:
-            raise AssertionError("an opened movements tab without a table must fail")
+        html = get_card_movements_html(page, {"index": "0"})
+
+    assert html == ""
 
 
 def test_sync_card_movements_csv_uses_last_four_digits():
@@ -501,6 +499,16 @@ def test_section_diagnostic_never_reads_or_transfers_financial_data():
     assert not [term for term in forbidden if term in source]
 
 
+def test_section_diagnostic_waits_for_cards_before_counting():
+    page = Mock()
+    page.url = "https://digital.bna.com.ar/cards"
+    page.content.return_value = "<html></html>"
+    with patch("bna_diagnose_sections.click_section"), patch("builtins.print"):
+        inspect_cards(page)
+
+    page.wait_for_selector.assert_called_once_with('[id^="card-"]', timeout=30000)
+
+
 if __name__ == "__main__":
     test_discover_accounts_from_fixture()
     test_parse_account_movements_from_fixture()
@@ -519,7 +527,7 @@ if __name__ == "__main__":
     test_navigate_to_cards_uses_internal_link_and_semantic_wait()
     test_open_card_detail_never_hard_navigates()
     test_get_card_movements_html_returns_rendered_page()
-    test_get_card_movements_html_rejects_missing_table_after_tab_opens()
+    test_get_card_movements_html_accepts_card_without_rows()
     test_sync_card_movements_csv_uses_last_four_digits()
     test_list_card_statements_ignores_unrelated_lists()
     test_download_statement_pdf_saves_successful_download()
@@ -538,3 +546,4 @@ if __name__ == "__main__":
     test_authenticated_sync_runs_fragile_statements_after_loans()
     test_authenticated_sync_failure_messages_do_not_expose_identifiers()
     test_section_diagnostic_never_reads_or_transfers_financial_data()
+    test_section_diagnostic_waits_for_cards_before_counting()
