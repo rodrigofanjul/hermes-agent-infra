@@ -265,17 +265,18 @@ def sync_csv(filename: str, fieldnames: list[str], new_records: list[dict], pare
         for row in sorted(all_rows):
             writer.writerow(dict(zip(fieldnames, row)))
 
+    subprocess.run(
+        [VENV_PYTHON, GOOGLE_API_SCRIPT, "drive", "upload", local_path,
+         "--name", filename, "--parent", parent_folder_id],
+        capture_output=True, text=True, check=True,
+    )
+
     if existing_file_id:
         subprocess.run(
             [VENV_PYTHON, GOOGLE_API_SCRIPT, "drive", "delete", existing_file_id, "--permanent"],
             capture_output=True, text=True, check=True,
         )
 
-    subprocess.run(
-        [VENV_PYTHON, GOOGLE_API_SCRIPT, "drive", "upload", local_path,
-         "--name", filename, "--parent", parent_folder_id],
-        capture_output=True, text=True, check=True,
-    )
     os.remove(local_path)
 
 
@@ -357,8 +358,10 @@ def get_card_movements_html(page: Page, card: dict) -> str:
     page.wait_for_load_state("networkidle")
     try:
         page.wait_for_selector("table tbody", timeout=15000)
-    except Exception:
-        pass
+    except Exception as exc:
+        raise BNADataUnavailableError(
+            "BNA no proporcionó la tabla de movimientos de la tarjeta"
+        ) from exc
     return page.content()
 
 
@@ -424,6 +427,8 @@ def sync_card_statements(page: Page, card: dict, resumenes_folder_id: str) -> li
         return []
     page.wait_for_load_state("networkidle")
     labels = list_card_statements(page.content())
+    if not labels:
+        raise BNADataUnavailableError("BNA no proporcionó la lista de resúmenes")
 
     failed = []
     for index, label in enumerate(labels):

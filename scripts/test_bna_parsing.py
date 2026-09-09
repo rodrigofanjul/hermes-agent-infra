@@ -2,7 +2,7 @@
 """Fast, repeatable tests for bna_sync.py's HTML parsing functions, run
 against fixture files (no live login needed)."""
 import os
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import MagicMock, Mock, mock_open, patch
 
 from bna_diagnose_accounts import sanitized_path
 from bna_sync import (
@@ -25,6 +25,7 @@ from bna_sync import (
     validate_account_detail,
     sync_card_movements_csv,
     sync_card_statements,
+    sync_csv,
     sync_loan_installments_csv,
 )
 
@@ -188,6 +189,18 @@ def test_get_card_movements_html_returns_rendered_page():
     assert html == page.content.return_value
 
 
+def test_get_card_movements_html_rejects_missing_table_after_tab_opens():
+    page = Mock()
+    page.wait_for_selector.side_effect = RuntimeError("table timeout")
+    with patch("bna_sync.open_card_detail"):
+        try:
+            get_card_movements_html(page, {"index": "0"})
+        except BNADataUnavailableError as exc:
+            assert "tabla de movimientos" in str(exc)
+        else:
+            raise AssertionError("an opened movements tab without a table must fail")
+
+
 def test_sync_card_movements_csv_uses_last_four_digits():
     movements = [{"description": "COMPRA", "date": "01/09/2026", "amount": "$ 1,00"}]
     with patch("bna_sync.sync_csv") as mocked_sync:
@@ -244,6 +257,18 @@ def test_sync_card_statements_accepts_card_without_summaries_tab():
         result = sync_card_statements(page, {"index": "1", "last4": "5678"}, "folder-id")
 
     assert result == []
+
+
+def test_sync_card_statements_rejects_loaded_tab_without_statement_rows():
+    page = Mock()
+    page.content.return_value = "<html><body>Resúmenes</body></html>"
+    with patch("bna_sync.open_card_detail"):
+        try:
+            sync_card_statements(page, {"index": "0", "last4": "1234"}, "folder-id")
+        except BNADataUnavailableError as exc:
+            assert "lista de resúmenes" in str(exc)
+        else:
+            raise AssertionError("a loaded summaries tab without rows must fail")
 
 
 def test_sync_card_statements_skips_files_already_in_drive():
@@ -371,6 +396,32 @@ def test_sync_loan_installments_csv_uses_loan_number():
     )
 
 
+def test_sync_csv_uploads_replacement_before_deleting_existing_file():
+    commands = []
+
+    def record_command(command, **kwargs):
+        commands.append(command)
+        result = Mock()
+        result.stdout = "[]"
+        return result
+
+    with (
+        patch("bna_sync.drive_find_file", return_value="old-file-id"),
+        patch("bna_sync.subprocess.run", side_effect=record_command),
+        patch("builtins.open", mock_open(read_data="date,balance\n")),
+        patch("bna_sync.os.remove"),
+    ):
+        sync_csv(
+            "saldo_cuenta.csv",
+            ["date", "balance"],
+            [{"date": "2026-09-09", "balance": "1.000,00"}],
+            "folder-id",
+        )
+
+    operations = [command[3] for command in commands]
+    assert operations == ["download", "upload", "delete"]
+
+
 if __name__ == "__main__":
     test_discover_accounts_from_fixture()
     test_parse_account_movements_from_fixture()
@@ -389,11 +440,13 @@ if __name__ == "__main__":
     test_navigate_to_cards_uses_internal_link_and_semantic_wait()
     test_open_card_detail_never_hard_navigates()
     test_get_card_movements_html_returns_rendered_page()
+    test_get_card_movements_html_rejects_missing_table_after_tab_opens()
     test_sync_card_movements_csv_uses_last_four_digits()
     test_list_card_statements_ignores_unrelated_lists()
     test_download_statement_pdf_saves_successful_download()
     test_download_statement_pdf_retries_are_bounded()
     test_sync_card_statements_accepts_card_without_summaries_tab()
+    test_sync_card_statements_rejects_loaded_tab_without_statement_rows()
     test_sync_card_statements_skips_files_already_in_drive()
     test_sync_card_statements_uploads_new_pdf()
     test_sync_card_statements_reports_failed_month()
@@ -402,3 +455,4 @@ if __name__ == "__main__":
     test_navigate_to_loans_uses_internal_link()
     test_get_loan_installments_uses_spa_link_and_all_filter()
     test_sync_loan_installments_csv_uses_loan_number()
+    test_sync_csv_uploads_replacement_before_deleting_existing_file()
