@@ -482,6 +482,25 @@ def test_authenticated_sync_failure_messages_do_not_expose_identifiers():
     assert "0014682194" not in message
 
 
+def test_section_diagnostic_never_reads_or_transfers_financial_data():
+    diagnostic_path = os.path.join(os.path.dirname(__file__), "bna_diagnose_sections.py")
+    with open(diagnostic_path, encoding="utf-8") as source_file:
+        source = source_file.read()
+
+    forbidden = [
+        "response.body",
+        "response.text",
+        "response.json",
+        "post_data",
+        "Authorization",
+        "drive_find_file",
+        "sync_csv",
+        "expect_download",
+        "save_as",
+    ]
+    assert not [term for term in forbidden if term in source]
+
+
 if __name__ == "__main__":
     test_discover_accounts_from_fixture()
     test_parse_account_movements_from_fixture()
@@ -518,3 +537,4 @@ if __name__ == "__main__":
     test_sync_csv_uploads_replacement_before_deleting_existing_file()
     test_authenticated_sync_runs_fragile_statements_after_loans()
     test_authenticated_sync_failure_messages_do_not_expose_identifiers()
+    test_section_diagnostic_never_reads_or_transfers_financial_data()
