@@ -72,7 +72,7 @@ y con el usuario logueado manualmente. Hallazgos:
   `POST /api/v1/execute/latest.account.movements.download`, un
   endpoint con **fingerprinting de dispositivo muy pesado** en el body
   (hash de canvas, hash de WebGL, fuentes instaladas, resolución de
-  pantalla, etc.) firmado con un campcampo `_std_` (probablemente un
+  pantalla, etc.) firmado con un campo `_std_` (probablemente un
   HMAC del payload). La respuesta no trae el archivo — es
   `{"data": {}}` — y `/digitalDocuments` resultó ser una página de
   preferencias de envío por correo, no una bandeja de descargas: **el
@@ -86,20 +86,40 @@ y con el usuario logueado manualmente. Hallazgos:
   Crédito, 2 Mastercard Débito), cada una un `<button id="card-{i}">`
   que navega a `/cards/creditCards/detail/<hash-opaco>`. Esa página
   tiene tabs: **Movimientos** (misma tabla HTML que cuentas — Detalle/
-  Fecha/Monto) y **Resúmenes** (lista de 12 meses, cada uno con un
-  botón de descarga con `icon="receipt_download"`).
-  - **Sin confirmar**: qué hace exactamente ese botón de descarga. Un
-    primer intento de clickearlo vía JS **cortó la sesión** (la página
-    quedó en `about:blank` y una navegación posterior redirigió a
-    login) — posiblemente abrió una pestaña nueva con un PDF y el
-    contexto de Playwright se confundió, o el patrón de click disparó
-    algo que el backend interpretó como sospechoso. **La implementación
-    debe investigar esto con cuidado** (probar `page.waitForEvent('popup')`
-    en vez de asumir un `download` event, revisar si hace falta un
-    gesto de usuario real en vez de `.click()` vía `page.evaluate`,
-    etc.) antes de asumir que funciona iterando las 4 tarjetas × 12
-    meses en producción — mismo tipo de investigación empírica que hizo
-    falta para el timeout de descarga de resúmenes en Galicia.
+  Fecha/Monto; confirmado en dos sesiones de reconocimiento distintas
+  que **no tiene paginación ni "mostrar más"** — la tabla siempre trae
+  todo el período actual de una vez, a diferencia de las tarjetas de
+  Galicia) y **Resúmenes** (lista de 12 meses, cada uno con un botón de
+  descarga accesible con nombre "Descargar").
+  - **Confirmado en una segunda sesión de reconocimiento**: la causa
+    real del corte de sesión fue usar un click JS crudo
+    (`element.click()` vía `page.evaluate`) en vez de un click real de
+    Playwright — eso deja al backend/frontend en un estado inconsistente
+    (probablemente porque el manejador de descarga del sitio depende de
+    un evento de click "de verdad", con `isTrusted: true`, para abrir el
+    stream de descarga correctamente). Usando `page.get_by_role("button",
+    name="Descargar").click()` (un click real, no vía `evaluate`) dentro
+    de `page.expect_download()`, la descarga funciona: dispara
+    `POST /api/v1/execute/historicalStatement.download` (mismo patrón de
+    auth por bearer JWT) y el PDF real baja sin problema
+    (`NATIVA_INTERNACIONAL_MC11-F_VTO_02-Sep-26.pdf`, nombre real del
+    banco, se puede usar el `suggested_filename` de Playwright tal cual
+    en vez de construir uno propio).
+  - **Throttle confirmado en descargas consecutivas**: la 1ª descarga de
+    la sesión funciona rápido (~2s); una 2ª descarga inmediatamente
+    después falla dos veces seguidas con un error genérico del backend
+    (`{"code": "BAK001E", "message": "No pudimos realizar la
+    operación..."}`, ~20s de espera antes de fallar) y la página navega
+    a `/error` — la sesión general sigue viva (no es un logout, es
+    aislado a ese endpoint). **Decisión** (confirmada con el usuario):
+    no espaciar artificialmente ni limitar a 1 PDF por corrida — en vez
+    de eso, `download_statement_pdf` reintenta el click un número
+    acotado de veces (ej. 3, con una espera corta entre intentos) si la
+    página cae en `/error`, volviendo primero a la lista de resúmenes;
+    si todos los reintentos fallan para un mes puntual, se trata como
+    fallo parcial de esa sección (no aborta el resto) y el dedupe por
+    nombre de archivo hace que se reintente solo en la corrida del día
+    siguiente.
   - Las tarjetas de **débito probablemente no tienen resúmenes**
     (están ligadas a una cuenta, no tienen ciclo de facturación) — a
     confirmar en la implementación; si el tab "Resúmenes" no existe
@@ -202,12 +222,14 @@ módulo compartido si el segundo script hace evidente que vale la pena
 4. **Descubrimiento de tarjetas**: parsear `/cards`, enumerar cada
    `button#card-{i}`, distinguir Crédito de Débito por el texto visible.
 5. **Por cada tarjeta**: navegar a su URL de detalle, tab
-   "Movimientos" → parsear tabla, dedupe+upload. Si es de Crédito
-   (o si el tab "Resúmenes" existe), ir al tab "Resúmenes", investigar
-   empíricamente el mecanismo de descarga real (ver hallazgo de la
-   sesión cortada arriba) antes de asumir un patrón, y sincronizar los
-   PDFs no descargados aún (dedupe por nombre de archivo, igual que
-   Galicia).
+   "Movimientos" → parsear tabla, dedupe+upload. Si el tab "Resúmenes"
+   existe (confirmado ausente en tarjetas de débito), ir a "Resúmenes",
+   descargar cada PDF no sincronizado aún con un click real (`get_by_role`,
+   nunca `.click()` vía `page.evaluate` — ver hallazgo de reconocimiento
+   arriba) dentro de `page.expect_download()`, con reintento acotado si
+   la página cae en `/error` (throttle del backend, ver arriba); dedupe
+   por nombre de archivo (`suggested_filename` real del banco), igual
+   que Galicia.
 6. **Descubrimiento de préstamos**: parsear `/loans/list`, enumerar
    cada préstamo por su `href` real.
 7. **Por cada préstamo**: navegar a su URL de detalle, seleccionar el
@@ -250,13 +272,10 @@ Mismo procedimiento que Galicia:
 3. Correr una segunda vez seguida, confirmar dedupe (sin cambios en
    Drive).
 4. Confirmar logout real.
-5. Prestar especial atención al mecanismo de descarga de resúmenes de
-   tarjeta (el punto más incierto de este diseño) — si tras
-   investigarlo empíricamente resulta demasiado frágil o riesgoso
-   (ej. sigue cortando la sesión), es aceptable entregar este proyecto
-   sin resúmenes de tarjeta en PDF (cuentas + movimientos + préstamos
-   igual aportan valor) y dejarlo documentado como limitación conocida
-   en vez de forzar una solución fragile.
+5. Confirmar en la implementación que el reintento de descarga de
+   resúmenes (ver "Reconocimiento previo") realmente recupera el PDF
+   tras un fallo `BAK001E` — probar bajando al menos 2 resúmenes
+   distintos de la misma tarjeta en una sola corrida.
 6. Recién después, registrar el cron job real.
 
 ## Rollback
