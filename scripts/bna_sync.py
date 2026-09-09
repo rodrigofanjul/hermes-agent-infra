@@ -204,11 +204,12 @@ def parse_account_balance(html: str) -> str:
     return match.group(1) if match else ""
 
 
-def validate_account_detail(movements: list[dict], balance: str) -> None:
+def validate_account_detail(html: str, balance: str) -> None:
     if not balance:
         raise BNADataUnavailableError("BNA no proporcionó el saldo de la cuenta")
-    if not movements:
-        raise BNADataUnavailableError("BNA no proporcionó movimientos de la cuenta")
+    soup = BeautifulSoup(html, "html.parser")
+    if not soup.select_one("table tbody"):
+        raise BNADataUnavailableError("BNA no proporcionó la tabla de movimientos")
 
 
 def slugify(name: str) -> str:
@@ -309,8 +310,9 @@ def main() -> int:
                         html = get_account_detail_html(page, account)
                         movements = parse_bank_table(html, ["date", "receipt", "description", "amount"])
                         balance = parse_account_balance(html)
-                        validate_account_detail(movements, balance)
-                        sync_account_movements_csv(account["name"], movements, CUENTAS_FOLDER_ID)
+                        validate_account_detail(html, balance)
+                        if movements:
+                            sync_account_movements_csv(account["name"], movements, CUENTAS_FOLDER_ID)
                         sync_account_balance_csv(account["name"], balance, CUENTAS_FOLDER_ID)
                     except Exception as e:
                         failures.append(f"cuenta {account['name']}: {e}")

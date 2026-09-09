@@ -76,20 +76,24 @@ def test_classify_accounts_html_rejects_unrecognized_page():
 
 def test_validate_account_detail_rejects_missing_balance():
     try:
-        validate_account_detail([{"date": "01/01/2026"}], "")
+        validate_account_detail("<table><tbody><tr><td>movimiento</td></tr></tbody></table>", "")
     except BNADataUnavailableError as exc:
         assert "saldo" in str(exc)
     else:
         raise AssertionError("a missing balance must fail closed")
 
 
-def test_validate_account_detail_rejects_empty_movements():
+def test_validate_account_detail_allows_rendered_empty_movements_table():
+    validate_account_detail("<table><tbody></tbody></table>", "1.000,00")
+
+
+def test_validate_account_detail_rejects_missing_movements_table():
     try:
-        validate_account_detail([], "1.000,00")
+        validate_account_detail("<html><body>Cargando...</body></html>", "1.000,00")
     except BNADataUnavailableError as exc:
-        assert "movimientos" in str(exc)
+        assert "tabla de movimientos" in str(exc)
     else:
-        raise AssertionError("an unexpectedly empty movement table must fail closed")
+        raise AssertionError("a missing movement table must fail closed")
 
 
 def test_navigate_to_accounts_uses_internal_link_and_semantic_wait():
@@ -130,7 +134,8 @@ if __name__ == "__main__":
     test_classify_accounts_html_rejects_explicit_zero_accounts()
     test_classify_accounts_html_rejects_unrecognized_page()
     test_validate_account_detail_rejects_missing_balance()
-    test_validate_account_detail_rejects_empty_movements()
+    test_validate_account_detail_allows_rendered_empty_movements_table()
+    test_validate_account_detail_rejects_missing_movements_table()
     test_navigate_to_accounts_uses_internal_link_and_semantic_wait()
     test_get_account_detail_navigates_back_through_spa()
     test_sanitized_path_removes_queries_and_long_identifiers()
