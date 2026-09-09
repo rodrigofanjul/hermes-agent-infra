@@ -454,6 +454,34 @@ def test_authenticated_sync_runs_fragile_statements_after_loans():
     assert events == ["loans", "statements"]
 
 
+def test_authenticated_sync_failure_messages_do_not_expose_identifiers():
+    page = Mock()
+    account = {"index": "0", "name": "PRIVATE ACCOUNT 1234"}
+    card = {"index": "0", "kind": "credit", "last4": "5678"}
+    loan = {"url": "/loans/abc123", "number": "0014682194"}
+    with (
+        patch("bna_sync.discover_accounts", return_value=[account]),
+        patch("bna_sync.get_account_detail_html", side_effect=RuntimeError("private account 1234")),
+        patch("bna_sync.discover_cards", return_value=[card]),
+        patch("bna_sync.get_card_movements_html", side_effect=RuntimeError("card 5678")),
+        patch("bna_sync.discover_loans", return_value=[loan]),
+        patch("bna_sync.get_loan_installments_html", side_effect=RuntimeError("loan 0014682194")),
+        patch("bna_sync.sync_card_statements", side_effect=RuntimeError("statement 5678")),
+    ):
+        failures = sync_authenticated(page)
+
+    message = "; ".join(failures)
+    assert failures == [
+        "cuentas",
+        "movimientos de tarjetas",
+        "préstamos",
+        "resúmenes de tarjetas",
+    ]
+    assert "1234" not in message
+    assert "5678" not in message
+    assert "0014682194" not in message
+
+
 if __name__ == "__main__":
     test_discover_accounts_from_fixture()
     test_parse_account_movements_from_fixture()
@@ -489,3 +517,4 @@ if __name__ == "__main__":
     test_sync_loan_installments_csv_uses_loan_number()
     test_sync_csv_uploads_replacement_before_deleting_existing_file()
     test_authenticated_sync_runs_fragile_statements_after_loans()
+    test_authenticated_sync_failure_messages_do_not_expose_identifiers()

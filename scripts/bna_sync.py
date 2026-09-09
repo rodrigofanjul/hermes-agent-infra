@@ -543,9 +543,9 @@ def sync_authenticated(page: Page) -> list[str]:
                     sync_account_movements_csv(account["name"], movements, CUENTAS_FOLDER_ID)
                 sync_account_balance_csv(account["name"], balance, CUENTAS_FOLDER_ID)
             except Exception as e:
-                failures.append(f"cuenta {account['name']}: {e}")
+                failures.append("cuentas")
     except Exception as e:
-        failures.append(f"descubrimiento de cuentas: {e}")
+        failures.append("cuentas")
 
     cards = []
     try:
@@ -564,9 +564,9 @@ def sync_authenticated(page: Page) -> list[str]:
                         TARJETAS_FOLDER_ID,
                     )
             except Exception as e:
-                failures.append(f"movimientos tarjeta {card['last4']}: {e}")
+                failures.append("movimientos de tarjetas")
     except Exception as e:
-        failures.append(f"descubrimiento de tarjetas: {e}")
+        failures.append("movimientos de tarjetas")
 
     try:
         loans = discover_loans(page)
@@ -587,9 +587,9 @@ def sync_authenticated(page: Page) -> list[str]:
                     PRESTAMOS_FOLDER_ID,
                 )
             except Exception as e:
-                failures.append(f"préstamo {loan['number']}: {e}")
+                failures.append("préstamos")
     except Exception as e:
-        failures.append(f"descubrimiento de préstamos: {e}")
+        failures.append("préstamos")
 
     for card in cards:
         try:
@@ -599,14 +599,11 @@ def sync_authenticated(page: Page) -> list[str]:
                 RESUMENES_FOLDER_ID,
             )
             if failed_statements:
-                failures.append(
-                    f"resúmenes tarjeta {card['last4']}: "
-                    + ", ".join(failed_statements)
-                )
+                failures.append("resúmenes de tarjetas")
         except Exception as e:
-            failures.append(f"resúmenes tarjeta {card['last4']}: {e}")
+            failures.append("resúmenes de tarjetas")
 
-    return failures
+    return list(dict.fromkeys(failures))
 
 
 def main() -> int:
