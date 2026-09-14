@@ -637,16 +637,21 @@ todo a Drive. Diseño completo en
   ssh opc@oracle-us-west "sudo docker cp /tmp/galicia_sync.py <hermes-container>:/opt/data/scripts/galicia_sync.py"
   ```
 
-- **Cron job:** `Sync Galicia`, corre todos los días a las 9am hora
-  Argentina (`0 12 * * *` UTC — el scheduler de hermes opera en UTC),
+- **Cron job:** `Sync Galicia`, corre todos los días a las 21:00 hora
+  Argentina (`0 0 * * *` UTC — el scheduler de hermes opera en UTC),
   como job `--no-agent` (el script ES el job, no un prompt para el
   agente): stdout vacío = corrida silenciosa y exitosa; cualquier texto
   impreso se entrega por WhatsApp vía `--deliver origin` (falla de login
-  o de alguna sección puntual — el resto sigue corriendo igual).
-  Registrado con:
+  o de alguna sección puntual — el resto sigue corriendo igual). El
+  horario (21hs, no a la mañana) es deliberado: alimenta el pipeline de
+  gastos descripto más abajo (`sync_card_movements_to_sheet.py` +
+  "Resumen diario de gastos"), que necesita los movimientos del día
+  sincronizados antes del resumen de las 23:55 — 21hs evita además la
+  franja de mantenimiento/batch nocturno típica de bancos argentinos
+  (medianoche-4am) sin perder casi nada del día. Registrado con:
 
   ```bash
-  hermes cron create '0 12 * * *' --name 'Sync Galicia' --script galicia_sync.py --no-agent --deliver origin
+  hermes cron create '0 0 * * *' --name 'Sync Galicia' --script galicia_sync.py --no-agent --deliver origin
   ```
 
 - **Rollback:** `hermes cron remove 'Sync Galicia'` desregistra el job
@@ -671,14 +676,14 @@ y `google_api.py`, credenciales solo en env vars). Diseño en
   ssh opc@oracle-us-west "sudo docker cp /tmp/bna_sync.py <hermes-container>:/opt/data/scripts/bna_sync.py"
   ```
 
-- **Cron job:** `Sync BNA`, `5 12 * * *` UTC — 9am Argentina, 5 minutos
+- **Cron job:** `Sync BNA`, `5 0 * * *` UTC — 21:05 Argentina, 5 minutos
   después de "Sync Galicia" para no competir por recursos al correr
   ambos scripts de Playwright al mismo tiempo. Mismo contrato
-  `--no-agent --deliver origin` (stdout vacío = éxito silencioso).
-  Registrado con:
+  `--no-agent --deliver origin` (stdout vacío = éxito silencioso). Mismo
+  razonamiento de horario que Galicia (ver arriba). Registrado con:
 
   ```bash
-  hermes cron create '5 12 * * *' --name 'Sync BNA' --script bna_sync.py --no-agent --deliver origin
+  hermes cron create '5 0 * * *' --name 'Sync BNA' --script bna_sync.py --no-agent --deliver origin
   ```
 
 - **Limitación conocida:** la descarga de resúmenes de tarjeta en PDF
@@ -692,3 +697,24 @@ y `google_api.py`, credenciales solo en env vars). Diseño en
   limitación aceptada del lado de BNA, no un bug de este script.
 - **Rollback:** `hermes cron remove 'Sync BNA'` — aislado del resto,
   no afecta a `galicia_sync.py` ni a ningún otro cron job.
+
+**[`scripts/sync_card_movements_to_sheet.py`](scripts/sync_card_movements_to_sheet.py)**
+cierra el pipeline diario de gastos: lee los `tarjeta_*.csv` que
+`galicia_sync.py` y `bna_sync.py` ya dejaron en Drive, normaliza cada
+fila a un esquema común, y agrega (append-only, dedupe por fila
+completa — nunca reescribe filas existentes) las que falten a la
+pestaña "Hoja 1" de la misma Google Sheet de gastos que usa el cron
+"Resumen diario de gastos" (sección 9). No usa Playwright ni toca
+ningún banco — solo Drive y Sheets vía `google_api.py`.
+
+- **Cron job:** `Sync movimientos tarjetas -> Sheet gastos`,
+  `15 0 * * *` UTC — 21:15 Argentina, 10 minutos después de "Sync BNA"
+  (le da margen a ambos syncs bancarios para terminar) y bastante antes
+  del "Resumen diario de gastos" (23:55 Argentina), que depende de que
+  estos movimientos ya estén cargados en la Sheet para calcular el
+  gasto del día. Los tres jobs (Galicia, BNA, y este) están
+  deliberadamente encadenados en ese orden — si cambiás el horario de
+  uno, revisá los otros dos.
+- **Rollback:** `hermes cron remove 'Sync movimientos tarjetas -> Sheet gastos'`
+  — no borra nada de lo ya cargado en la Sheet, solo detiene las cargas
+  futuras.
