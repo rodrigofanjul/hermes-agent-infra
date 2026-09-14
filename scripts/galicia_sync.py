@@ -159,17 +159,36 @@ def slugify(name: str) -> str:
     return s
 
 
+def run_gapi(*args: str) -> str:
+    """Runs google_api.py with the given args, returning its stdout.
+
+    A bare `subprocess.CalledProcessError` (what `check=True` raises)
+    only shows the command and exit code when stringified — it discards
+    google_api.py's actual stderr/traceback, which is where the real
+    failure reason (expired auth, a transient network error, a real bug)
+    lives. Every failure this script has reported so far said only
+    "returned non-zero exit status 1" with no way to tell those apart —
+    surfacing the stderr tail here makes the next real failure
+    diagnosable instead of another guessing game.
+    """
+    try:
+        result = subprocess.run(
+            [VENV_PYTHON, GOOGLE_API_SCRIPT, *args],
+            capture_output=True, text=True, check=True,
+        )
+    except subprocess.CalledProcessError as e:
+        stderr_tail = (e.stderr or "").strip()[-800:]
+        raise RuntimeError(f"google_api.py {args[0]} failed: {stderr_tail or '(no stderr captured)'}") from e
+    return result.stdout
+
+
 def drive_find_file(name: str, parent_folder_id: str) -> str | None:
     """Returns the file_id if a file with this exact name exists directly
     under parent_folder_id, else None. `google_api.py drive search` returns
     a JSON array of objects with at least "id" and "name" (confirmed via
     live invocation)."""
     query = f"name = '{name}' and '{parent_folder_id}' in parents and trashed = false"
-    result = subprocess.run(
-        [VENV_PYTHON, GOOGLE_API_SCRIPT, "drive", "search", query, "--raw-query"],
-        capture_output=True, text=True, check=True,
-    )
-    matches = json.loads(result.stdout)
+    matches = json.loads(run_gapi("drive", "search", query, "--raw-query"))
     return matches[0]["id"] if matches else None
 
 
@@ -188,10 +207,7 @@ def sync_csv(filename: str, fieldnames: list[str], new_records: list[dict], pare
     local_path = f"/tmp/{filename}"
 
     if existing_file_id:
-        subprocess.run(
-            [VENV_PYTHON, GOOGLE_API_SCRIPT, "drive", "download", existing_file_id, "--output", local_path],
-            capture_output=True, text=True, check=True,
-        )
+        run_gapi("drive", "download", existing_file_id, "--output", local_path)
         with open(local_path, encoding="utf-8") as f:
             for row in csv.DictReader(f):
                 existing_rows.add(tuple(row[k] for k in fieldnames))
@@ -209,16 +225,9 @@ def sync_csv(filename: str, fieldnames: list[str], new_records: list[dict], pare
             writer.writerow(dict(zip(fieldnames, row)))
 
     if existing_file_id:
-        subprocess.run(
-            [VENV_PYTHON, GOOGLE_API_SCRIPT, "drive", "delete", existing_file_id, "--permanent"],
-            capture_output=True, text=True, check=True,
-        )
+        run_gapi("drive", "delete", existing_file_id, "--permanent")
 
-    subprocess.run(
-        [VENV_PYTHON, GOOGLE_API_SCRIPT, "drive", "upload", local_path,
-         "--name", filename, "--parent", parent_folder_id],
-        capture_output=True, text=True, check=True,
-    )
+    run_gapi("drive", "upload", local_path, "--name", filename, "--parent", parent_folder_id)
     os.remove(local_path)
 
 
@@ -467,11 +476,7 @@ def sync_card_statements(page: Page, card_index: int, last4: str, resumenes_fold
 
         local_path = f"/tmp/{filename}"
         download_statement_pdf(page, row["index"], local_path)
-        subprocess.run(
-            [VENV_PYTHON, GOOGLE_API_SCRIPT, "drive", "upload", local_path,
-             "--name", filename, "--parent", resumenes_folder_id],
-            capture_output=True, text=True, check=True,
-        )
+        run_gapi("drive", "upload", local_path, "--name", filename, "--parent", resumenes_folder_id)
         os.remove(local_path)
 
 
