@@ -94,6 +94,23 @@ services:
       API_SERVER_ENABLED: "true"
       API_SERVER_HOST: "0.0.0.0"
       API_SERVER_KEY: ${API_SERVER_KEY:?API_SERVER_KEY must be set (>=16 chars) so hermes-webui can reach the gateway API}
+
+      # Points hermes's own agent-mode browser tool (browser_exec, backed by
+      # the `agent-browser` CLI) at the Chromium the Dockerfile already
+      # installs for Playwright scripts (see the Playwright RUN steps below).
+      # Confirmed live necessary: agent-browser's own `install --with-deps`
+      # step tries to download a pinned "Chrome for Testing" build that has
+      # no Linux ARM64 release, so it always fails on this server's Ampere
+      # (aarch64) instance — even though hermes's own Chromium-detection
+      # logic already recognizes PLAYWRIGHT_BROWSERS_PATH's contents as a
+      # usable browser, agent-browser needs to be told explicitly to use it
+      # instead of trying (and failing) its own download.
+      # CAUTION: chromium-1234 is a Playwright BUILD NUMBER, not a version
+      # string — it changes whenever the `playwright` pin in the Dockerfile
+      # is bumped. If the agent-mode browser tool stops working after a
+      # Playwright upgrade, `docker exec <container> ls /opt/hermes/.playwright`
+      # to find the new folder name and update this path to match.
+      AGENT_BROWSER_EXECUTABLE_PATH: /opt/hermes/.playwright/chromium-1234/chrome-linux/chrome
     healthcheck:
       # Mirrors the healthcheck the original Coolify template used for
       # this same image family (`test -d /home/hermes/.hermes || exit 1`):
