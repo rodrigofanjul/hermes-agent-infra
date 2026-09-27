@@ -602,9 +602,9 @@ def sync_authenticated(page: Page) -> list[str]:
                     sync_account_movements_csv(account["name"], movements, CUENTAS_FOLDER_ID)
                 sync_account_balance_csv(account["name"], balance, CUENTAS_FOLDER_ID)
             except Exception as e:
-                failures.append("cuentas")
+                failures.append(f"cuentas: {e}")
     except Exception as e:
-        failures.append("cuentas")
+        failures.append(f"cuentas: {e}")
 
     cards = []
     try:
@@ -623,9 +623,9 @@ def sync_authenticated(page: Page) -> list[str]:
                         TARJETAS_FOLDER_ID,
                     )
             except Exception as e:
-                failures.append("movimientos de tarjetas")
+                failures.append(f"movimientos de tarjetas: {e}")
     except Exception as e:
-        failures.append("movimientos de tarjetas")
+        failures.append(f"movimientos de tarjetas: {e}")
 
     try:
         loans = discover_loans(page)
@@ -646,9 +646,9 @@ def sync_authenticated(page: Page) -> list[str]:
                     PRESTAMOS_FOLDER_ID,
                 )
             except Exception as e:
-                failures.append("préstamos")
+                failures.append(f"préstamos: {e}")
     except Exception as e:
-        failures.append("préstamos")
+        failures.append(f"préstamos: {e}")
 
     for card in cards:
         try:
@@ -660,7 +660,7 @@ def sync_authenticated(page: Page) -> list[str]:
             if failed_statements:
                 failures.append("resúmenes de tarjetas")
         except Exception as e:
-            failures.append("resúmenes de tarjetas")
+            failures.append(f"resúmenes de tarjetas: {e}")
 
     return list(dict.fromkeys(failures))
 
