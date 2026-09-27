@@ -140,7 +140,12 @@ services:
     # forward. Its multi-arch (amd64+arm64) image is published on
     # ghcr.io. Being on the experimental track, expect more churn than a
     # stable tag — see README "Actualización" for the review cadence.
-    image: ghcr.io/nesquena/hermes-webui:exp-v0.52.379
+    #
+    # NOTE: the docker image tag drops the "exp-v" prefix that the GitHub
+    # release/git tag uses (e.g. release "exp-v0.52.379" -> image tag
+    # "0.52.379") — confirmed against the ghcr.io registry API after a
+    # deploy failed with "manifest unknown" for the "exp-v..." spelling.
+    image: ghcr.io/nesquena/hermes-webui:0.52.379
     container_name: hermes-webui
     depends_on:
       - hermes
