@@ -14,7 +14,7 @@
 # /opt/hermes (including the venv this RUN installs into) lives inside
 # that volume. See README section 11 for the full procedure; skipping
 # it is exactly what crash-looped the first Mnemosyne deploy.
-FROM nousresearch/hermes-agent:v2026.8.31
+FROM nousresearch/hermes-agent:v2026.9.24
 
 RUN uv pip install --python /opt/hermes/.venv/bin/python mnemosyne-hermes==0.5.0
 

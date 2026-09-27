@@ -133,13 +133,14 @@ services:
     # nesquena/hermes-webui#6458 (the "Building wheels or sdists for
     # hermes-agent is not supported" crash-loop this repo hit historically
     # with the stable v0.51.92/v0.52.113 tags, which sit 263+ commits
-    # behind the fix). The "stable" v-track has NOT absorbed the fix as of
-    # 2026-08-26 — 0.52.264 is on the experimental track but is the tag
-    # actually confirmed (via `git compare` against the fix commit) to
-    # include it, and its multi-arch (amd64+arm64) image is published on
+    # behind the fix). The "stable" v-track still hasn't absorbed the fix
+    # as of 2026-09-27 (still at v0.52.113) — exp-v0.52.379 is on the
+    # experimental track, 584+ commits ahead of the first tag that
+    # included #6458 (0.52.264, confirmed 2026-08-26), so the fix carries
+    # forward. Its multi-arch (amd64+arm64) image is published on
     # ghcr.io. Being on the experimental track, expect more churn than a
     # stable tag — see README "Actualización" for the review cadence.
-    image: ghcr.io/nesquena/hermes-webui:0.52.264
+    image: ghcr.io/nesquena/hermes-webui:exp-v0.52.379
     container_name: hermes-webui
     depends_on:
       - hermes
