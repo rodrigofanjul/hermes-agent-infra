@@ -175,6 +175,14 @@ services:
       # nesquena/hermes-webui#8113 (still open; remove once the image pins 3.14).
       UV_PYTHON: "3.14"
 
+      # Lets the webui's Python find the Mnemosyne plugin's dependency
+      # environment so its chats use the same long-term memory as WhatsApp/cron.
+      # The directory and its sitecustomize.py are created (idempotently) in the
+      # shared hermes-data volume by mnemosyne-bootstrap.sh on every agent boot;
+      # a missing directory is harmless (Python ignores it). On a brand-new
+      # install, restart the webui once after the agent has installed the plugin.
+      PYTHONPATH: /home/hermeswebui/.hermes/webui-site
+
       # Lets webui reach the agent's gateway API over the compose network
       # for its Tasks/cron and "gateway reachable" status features.
       HERMES_API_URL: http://hermes:8642

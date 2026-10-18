@@ -472,6 +472,14 @@ En corto:
   (constructor de `mnemosyne-hermes` 0.7.3/0.7.4 roto con Hermes 0.22). Se
   desactiva solo cuando el constructor ya funciona; revisá si salió
   `mnemosyne-hermes` 0.7.5+ en PyPI y, si ya construye sin parche, borralo.
+- Mnemosyne también funciona en los chats de `hermes-webui`: la webui corre
+  el agente en su propio venv y no ve el entorno de dependencias del plugin,
+  así que `mnemosyne-bootstrap.sh` crea (idempotente) en `hermes-data`
+  un `webui-site/sitecustomize.py` que agrega ese entorno al final del
+  `sys.path`, y el servicio `hermes-webui` lo usa con `PYTHONPATH` en el
+  compose. En una instalación nueva, reiniciá la webui una vez después de
+  que el agente instale el plugin. Además, la webui necesita `UV_PYTHON=3.14`
+  (issue upstream nesquena/hermes-webui#8113).
 - Los datos de Mnemosyne están guardados por sesión (`scope='session'`): un
   `mnemosyne_recall` desde una sesión nueva devuelve 0 resultados; es
   esperado, no una pérdida de memoria.
@@ -660,6 +668,13 @@ todo a Drive. Diseño completo en
   scp scripts/galicia_sync.py opc@oracle-us-west:/tmp/galicia_sync.py
   ssh opc@oracle-us-west "sudo docker cp /tmp/galicia_sync.py <hermes-container>:/opt/data/scripts/galicia_sync.py"
   ```
+
+> **Entrega de avisos de los crons:** usá `--deliver whatsapp` de forma
+> explícita. `--deliver origin` resuelve a la plataforma desde donde se creó
+> el job; si se crea desde un chat de `hermes-webui` falla con
+> `unknown platform 'webui'` y los avisos no llegan. (`Sync movimientos
+> tarjetas -> Sheet gastos` estaba así y se corrigió con
+> `hermes cron edit <id> --deliver whatsapp`.)
 
 - **Cron job:** `Sync Galicia`, corre todos los días a las 21:00 hora
   Argentina (`0 0 * * *` UTC — el scheduler de hermes opera en UTC),

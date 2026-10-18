@@ -20,6 +20,43 @@ CHANGED=0
 
 mkdir -p "$HERMES_HOME/plugins"
 
+# hermes-webui runs the agent in its OWN Python venv, which cannot see the
+# Mnemosyne plugin's dependency environment under /opt/data/installs (that
+# environment is composed only into the agent's own processes). Without this,
+# webui chats log "Memory provider 'mnemosyne' loaded but no provider instance
+# found" and have no long-term memory. The webui service sets
+# PYTHONPATH=/home/hermeswebui/.hermes/webui-site (see docker-compose.yml);
+# Python imports sitecustomize.py from there at startup and it APPENDS (never
+# prepends) the plugin environment, so the webui's own packages keep priority.
+# Located with a glob, so it survives plugin updates that change the env hashes.
+# Rewritten only when its content changes (idempotent).
+WEBUI_SITE="$HERMES_HOME/webui-site"
+mkdir -p "$WEBUI_SITE"
+cat > "$WEBUI_SITE/sitecustomize.py.new" <<'PYEOF'
+# Managed by mnemosyne-bootstrap.sh (hermes-agent-infra) - do not edit by hand.
+# hermes-webui runs the agent in its own venv, which cannot see the Mnemosyne
+# plugin's dependency environment under ~/.hermes/installs/. Append (never
+# prepend) that environment so the webui's own packages keep priority.
+import glob as _glob
+import sys as _sys
+
+try:
+    _tag = "python%d.%d" % (_sys.version_info[0], _sys.version_info[1])
+    for _p in sorted(_glob.glob(
+        "/home/hermeswebui/.hermes/installs/*/environments/*/venv/lib/%s/site-packages" % _tag
+    )):
+        if _p not in _sys.path:
+            _sys.path.append(_p)
+except Exception:
+    pass
+PYEOF
+if cmp -s "$WEBUI_SITE/sitecustomize.py.new" "$WEBUI_SITE/sitecustomize.py" 2>/dev/null; then
+  rm -f "$WEBUI_SITE/sitecustomize.py.new"
+else
+  mv "$WEBUI_SITE/sitecustomize.py.new" "$WEBUI_SITE/sitecustomize.py"
+  echo "mnemosyne-bootstrap: wrote $WEBUI_SITE/sitecustomize.py (Mnemosyne for hermes-webui)"
+fi
+
 # Legacy layout (hermes <= v2026.9.x): plugins/mnemosyne held symlinks into the
 # old image's mnemosyne_hermes package. After the upgrade they dangle, and the
 # catalog installer would refuse to replace them. Move them aside, don't delete.
