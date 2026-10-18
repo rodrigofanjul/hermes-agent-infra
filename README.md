@@ -455,6 +455,30 @@ cualquier fix relevante comparándolo contra el commit del fix en GitHub
 actualizar solo `hermes-webui` (ese volumen depende de la versión del
 agente, no de la webui).
 
+### Estado de versiones (2026-10-17) y particularidades de v0.22
+
+Agente `v0.22.2` y `hermes-webui` `0.52.458` (track estable). Desde v0.22 los
+tags del agente son SemVer (`v0.22.x`, no `vYYYY.M.D`) y cambian varias cosas
+que importan al operar este repo — detalle y verificación completa en
+[docs/superpowers/specs/2026-10-17-hermes-v0.22-upgrade.md](docs/superpowers/specs/2026-10-17-hermes-v0.22-upgrade.md).
+En corto:
+
+- Mnemosyne ya no se instala con `pip` en el `Dockerfile`: es un plugin de
+  catálogo que `mnemosyne-bootstrap.sh` instala **en el primer arranque** en
+  el volumen `hermes-data` (necesita salida a internet esa vez) y reinicia el
+  gateway una vez. La memoria (`/opt/data/mnemosyne/data/mnemosyne.db`) no se
+  toca.
+- `mnemosyne-ctor-fix.py` es un parche **temporal** del PR upstream #1155
+  (constructor de `mnemosyne-hermes` 0.7.3/0.7.4 roto con Hermes 0.22). Se
+  desactiva solo cuando el constructor ya funciona; revisá si salió
+  `mnemosyne-hermes` 0.7.5+ en PyPI y, si ya construye sin parche, borralo.
+- Los datos de Mnemosyne están guardados por sesión (`scope='session'`): un
+  `mnemosyne_recall` desde una sesión nueva devuelve 0 resultados; es
+  esperado, no una pérdida de memoria.
+- Playwright vive en `/opt/hermes/.playwright` (`PLAYWRIGHT_BROWSERS_PATH` del
+  `Dockerfile`), separado del Chromium propio de Hermes en
+  `/opt/hermes/tools`.
+
 ### Configurar compresión de contexto (`tail_mode: lean`)
 
 Desde `v2026.8.27`/`0.20.6`, `lean` es el `tail_mode` por defecto en

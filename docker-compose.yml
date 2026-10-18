@@ -129,23 +129,18 @@ services:
         max-file: "3"
 
   hermes-webui:
-    # Pinned to a docker tag verified to include the fix for
-    # nesquena/hermes-webui#6458 (the "Building wheels or sdists for
-    # hermes-agent is not supported" crash-loop this repo hit historically
-    # with the stable v0.51.92/v0.52.113 tags, which sit 263+ commits
-    # behind the fix). The "stable" v-track still hasn't absorbed the fix
-    # as of 2026-09-27 (still at v0.52.113) — exp-v0.52.379 is on the
-    # experimental track, 584+ commits ahead of the first tag that
-    # included #6458 (0.52.264, confirmed 2026-08-26), so the fix carries
-    # forward. Its multi-arch (amd64+arm64) image is published on
-    # ghcr.io. Being on the experimental track, expect more churn than a
-    # stable tag — see README "Actualización" for the review cadence.
+    # Pinned to the latest STABLE track tag (v0.52.458, 2026-10-14), verified to
+    # include the fix for nesquena/hermes-webui#6458 (the "Building wheels or
+    # sdists for hermes-agent is not supported" crash-loop this repo hit
+    # historically with the old stable tags). Until 2026-10-17 this was pinned to
+    # the experimental track (exp-v0.52.379) because stable lagged behind that fix.
+    # Its multi-arch (amd64+arm64) image is published on ghcr.io.
     #
-    # NOTE: the docker image tag drops the "exp-v" prefix that the GitHub
-    # release/git tag uses (e.g. release "exp-v0.52.379" -> image tag
-    # "0.52.379") — confirmed against the ghcr.io registry API after a
-    # deploy failed with "manifest unknown" for the "exp-v..." spelling.
-    image: ghcr.io/nesquena/hermes-webui:0.52.379
+    # NOTE: the docker image tag drops the "v"/"exp-v" prefix that the GitHub
+    # release/git tag uses (release "v0.52.458" -> image tag "0.52.458") —
+    # confirmed against the ghcr.io registry after an earlier deploy failed with
+    # "manifest unknown" for the "exp-v..." spelling.
+    image: ghcr.io/nesquena/hermes-webui:0.52.458
     container_name: hermes-webui
     depends_on:
       - hermes
