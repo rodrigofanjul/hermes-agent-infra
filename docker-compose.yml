@@ -166,6 +166,15 @@ services:
       WANTED_UID: "1000"
       WANTED_GID: "1000"
 
+      # Build the webui's venv on Python 3.14. Since hermes-agent v0.21.6 the
+      # agent's pyproject.toml gates its core dependencies (python-dotenv,
+      # ruamel.yaml, openai, pydantic, ...) on python_version >= '3.14', but the
+      # webui image defaults to a 3.12 venv, so those are silently skipped and
+      # chat fails with "AIAgent not available ... No module named 'dotenv'".
+      # Upstream workaround, confirmed by several reporters on aarch64:
+      # nesquena/hermes-webui#8113 (still open; remove once the image pins 3.14).
+      UV_PYTHON: "3.14"
+
       # Lets webui reach the agent's gateway API over the compose network
       # for its Tasks/cron and "gateway reachable" status features.
       HERMES_API_URL: http://hermes:8642
