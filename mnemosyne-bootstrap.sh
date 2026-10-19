@@ -80,6 +80,15 @@ FIX_OUT="$("$VENV/bin/python" /usr/local/bin/mnemosyne-ctor-fix.py 2>&1)" \
 echo "$FIX_OUT"
 case "$FIX_OUT" in *"applied upstream"*) CHANGED=1 ;; esac
 
+# Hermes's browser tool in this setup is `browser_exec`, which drives Chromium
+# through the agent-browser CLI. Since v0.22 that CLI is managed by `hermes pm`
+# and the availability check never installs it, so without this step the model
+# is simply told it has no browser (and never reaches the lazy installer).
+# Installs into /opt/data/tools (persistent hermes-data volume); a ~2s no-op when
+# already installed. Needs internet only the first time. Not fatal if it fails.
+"$VENV/bin/hermes" pm install agent-browser \
+  || echo "mnemosyne-bootstrap: ERROR: could not install agent-browser - Hermes will report having no browser" >&2
+
 "$VENV/bin/hermes" config set memory.provider mnemosyne
 
 # The s6-supervised gateway starts in parallel with this script and may have

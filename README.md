@@ -483,6 +483,11 @@ En corto:
 - Los datos de Mnemosyne están guardados por sesión (`scope='session'`): un
   `mnemosyne_recall` desde una sesión nueva devuelve 0 resultados; es
   esperado, no una pérdida de memoria.
+- La herramienta de navegador de Hermes (`browser_exec`) necesita el CLI
+  `agent-browser`, que `mnemosyne-bootstrap.sh` instala con
+  `hermes pm install agent-browser` (queda en `hermes-data/tools`; sin esto
+  Hermes responde que no tiene navegador). Un navegador no incluye sesiones
+  iniciadas en sitios como LinkedIn: eso hay que resolverlo aparte.
 - Playwright vive en `/opt/hermes/.playwright` (`PLAYWRIGHT_BROWSERS_PATH` del
   `Dockerfile`), separado del Chromium propio de Hermes en
   `/opt/hermes/tools`.
