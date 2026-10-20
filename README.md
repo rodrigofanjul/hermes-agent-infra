@@ -488,6 +488,16 @@ En corto:
   `hermes pm install agent-browser` (queda en `hermes-data/tools`; sin esto
   Hermes responde que no tiene navegador). Un navegador no incluye sesiones
   iniciadas en sitios como LinkedIn: eso hay que resolverlo aparte.
+- El navegador de Hermes también funciona en los chats de `hermes-webui`:
+  la webui ejecuta las herramientas en su propio contenedor, que en la
+  imagen oficial no trae las librerías de sistema de Chromium. Por eso la
+  webui se construye desde `Dockerfile.webui` (imagen oficial fijada en su
+  línea `FROM` + esas librerías) y el compose define
+  `AGENT_BROWSER_EXECUTABLE_PATH` apuntando al Chromium de Playwright que
+  ya viene en el volumen `hermes-agent-src`. Para **actualizar la webui**,
+  cambiá el tag en `Dockerfile.webui` (ya no hay `image:` en el compose).
+  Si subís el pin de `playwright`, actualizá el número `chromium-NNNN` en
+  las dos variables `AGENT_BROWSER_EXECUTABLE_PATH` del compose.
 - Playwright vive en `/opt/hermes/.playwright` (`PLAYWRIGHT_BROWSERS_PATH` del
   `Dockerfile`), separado del Chromium propio de Hermes en
   `/opt/hermes/tools`.

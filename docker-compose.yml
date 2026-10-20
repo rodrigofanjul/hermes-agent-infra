@@ -129,7 +129,8 @@ services:
         max-file: "3"
 
   hermes-webui:
-    # Pinned to the latest STABLE track tag (v0.52.458, 2026-10-14), verified to
+    # The upstream tag is pinned in Dockerfile.webui (FROM line). Pinned to the
+    # latest STABLE track tag (v0.52.458, 2026-10-14), verified to
     # include the fix for nesquena/hermes-webui#6458 (the "Building wheels or
     # sdists for hermes-agent is not supported" crash-loop this repo hit
     # historically with the old stable tags). Until 2026-10-17 this was pinned to
@@ -140,7 +141,11 @@ services:
     # release/git tag uses (release "v0.52.458" -> image tag "0.52.458") —
     # confirmed against the ghcr.io registry after an earlier deploy failed with
     # "manifest unknown" for the "exp-v..." spelling.
-    image: ghcr.io/nesquena/hermes-webui:0.52.458
+    # Built from Dockerfile.webui: the pinned upstream hermes-webui image (bump
+    # the tag in that file's FROM line) plus the system libraries Chromium needs.
+    build:
+      context: .
+      dockerfile: Dockerfile.webui
     container_name: hermes-webui
     depends_on:
       - hermes
@@ -182,6 +187,13 @@ services:
       # a missing directory is harmless (Python ignores it). On a brand-new
       # install, restart the webui once after the agent has installed the plugin.
       PYTHONPATH: /home/hermeswebui/.hermes/webui-site
+
+      # Hermes' browser tool (browser_exec) in webui chats: use the Chromium the
+      # agent image installs for Playwright. It lives in the hermes-agent-src
+      # volume, which this container already mounts read-only. Same caveat as the
+      # hermes service: chromium-1234 is a Playwright BUILD number and changes
+      # when the playwright pin in the Dockerfile is bumped (update both).
+      AGENT_BROWSER_EXECUTABLE_PATH: /home/hermeswebui/.hermes/hermes-agent/.playwright/chromium-1234/chrome-linux/chrome
 
       # Lets webui reach the agent's gateway API over the compose network
       # for its Tasks/cron and "gateway reachable" status features.

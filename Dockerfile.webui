@@ -1,0 +1,24 @@
+# hermes-webui + the system libraries Chromium needs.
+#
+# Why this exists: the webui runs the agent (and its tools: terminal, browser,
+# files) in ITS OWN container. The upstream image is python:3.12-slim based and
+# ships none of the shared libraries Chromium links against, so in webui chats
+# Hermes' browser tool (browser_exec -> agent-browser -> Chromium) could not
+# start ("no browser"), while it worked in WhatsApp/cron/API (agent container,
+# which installs them via `playwright install --with-deps`). The Chromium
+# binary itself is NOT duplicated here: the webui already mounts the agent's
+# source volume (hermes-agent-src), which contains /.playwright/chromium-*, and
+# the compose points AGENT_BROWSER_EXECUTABLE_PATH at it.
+#
+# Upgrading hermes-webui: bump the tag in the FROM line below (compose no longer
+# has an `image:` line for this service). Verify that the base is still Debian
+# 13 / apt-based; package names below are Debian 13 (trixie) names.
+FROM ghcr.io/nesquena/hermes-webui:0.52.458
+
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      libx11-6 libxcomposite1 libxdamage1 libxext6 libxfixes3 libxrandr2 libxcb1 \
+      libxkbcommon0 libasound2t64 libatk1.0-0t64 libatk-bridge2.0-0t64 \
+      libatspi2.0-0t64 libcairo2 libcups2t64 libdbus-1-3 libgbm1 libglib2.0-0t64 \
+      libnspr4 libnss3 libpango-1.0-0 fonts-liberation \
+ && rm -rf /var/lib/apt/lists/*
